@@ -76,6 +76,25 @@
 
 ---
 
+### ADR 006: Frontend Architecture & Session State Persistence for Interactive Dispatch Dashboard
+* **Status:** Accepted
+* **Context:**
+  Streamlit executes its script sequentially from top to bottom upon every user interaction (e.g., time slider adjustment, disruption trigger clicks). Re-parsing benchmark files or re-solving initial baselines on every render would wipe out accumulated operational state, reset the simulation clock, and introduce unwanted input lag.
+* **Decision:**
+  Persist the optimization and simulation engine within `st.session_state`:
+  1. **State Isolation:** The `SimulationState` instance is stored in `st.session_state.sim`, and the virtual dispatch clock is tracked via `st.session_state.current_time`. Baseline setup executes strictly once on initial page load.
+  2. **Spatial Coordinate Inversion:** `plot_routes()` dynamically translates integer matrix location indices back into continuous Cartesian coordinates $(X, Y)$ via `unscale_value()`, ensuring spatial fidelity on the Plotly map.
+  3. **Multi-layer Visual Encoding:**
+     - **Depot:** Gold square (Node 0).
+     - **Completed Stops:** Emerald green markers with delivery timestamps and servicing van attribution.
+     - **Pending Stops:** Sky blue circles detailing remaining demand and operational time windows.
+     - **Rush Orders:** Glowing orange diamonds highlighting urgent mid-day requests.
+     - **Fleet Kinematics:** Purple markers indicating active van positions; crimson X markers highlighting broken down vehicles.
+     - **Routes:** Distinct color-coded paths for each operational van.
+  4. **Atomic Disruption Execution:** Buttons for time advancement, vehicle breakdown, and rush order injection mutate the persisted `SimulationState`, trigger sub-5ms re-planning, update sidebar KPIs, and invoke `st.rerun()` for instant UI synchronisation.
+
+---
+
 ## 2. Experiments & Benchmarks
 
 | Experiment ID | Date | Instance | Nodes | Engine | Exploration Level | Threads | Runtime | Solution Status |
@@ -83,6 +102,7 @@
 | EXP-001 | 2026-10-21 | Synthetic 2-node | 2 | pyvroom 1.15.2 | 1 | 1 | < 5 ms | Verified (Cost: 1000) |
 | EXP-002 | 2026-10-21 | Solomon C101-25 | 26 | pyvroom 1.15.2 | 1 | 2 | ~80 ms | Verified (Cost: 19183, 3 Routes) |
 | EXP-003 | 2026-10-21 | C101-25 Disruption (T=300, breakdown + new order) | 27 | pyvroom 1.15.2 | 1 | 2 | ~3.5 ms | Verified (Cost: 15430, 3 Active Routes) |
+| EXP-004 | 2026-10-21 | Streamlit + Plotly Interactive Dashboard End-to-End | 29 | pyvroom 1.15.2 | 1 | 2 | ~4.0 ms | Verified (Full UI state persistence & live reruns) |
 
 ---
 
@@ -94,4 +114,5 @@
 | Memory Buffer Diagnostics | Identified NumPy 2.x / Windows MSVC buffer signature mismatch (`'L'` vs `'I'`) in `pyvroom` and implemented `np.uintc` buffer translation. | Verified resolution via direct C++ matrix binding tests. |
 | Solomon Parser & Solver | Authored parsing algorithm for Solomon VRPTW format, scaling pipeline, Euclidean integer distance matrix calculator, and VROOM input problem generator. | Validated coordinate scaling and data integrity against standard Solomon C101 specifications. |
 | Step 2 Simulation Engine & Live Re-planning | Designed `SimulationState` manager, mid-route route slicing at $T_{\text{event}}$, vehicle kinematic translation, dynamic matrix expansion for new orders, vehicle breakdown reassignment, and sub-5ms re-planning. | Executed full automated integration verification suite testing simultaneous vehicle breakdown and order injection. |
+| Step 3 Interactive Dispatcher Dashboard | Engineered enterprise Streamlit frontend (`app.py`), session state persistence model, Plotly 2D spatial dispatch map with custom node markers, live KPI telemetry, and disruption control suite. | Validated end-to-end frontend workflows, coordinate inversion, and disruption re-planning cycles. |
 

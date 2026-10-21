@@ -126,3 +126,18 @@ def to_vroom_matrix(matrix: Union[np.ndarray, Sequence[Sequence[int]]]) -> Any:
         raise ValueError(f"Matrix must be 2D square array, got shape {arr.shape}")
         
     return vroom._vroom.Matrix(arr)
+
+
+def resolve_location_index(loc: Any) -> int:
+    """
+    Safely extract integer location index from either an int, numpy scalar, or pyvroom LocationIndex object.
+    
+    Args:
+        loc: Location index or pyvroom.LocationIndex instance.
+        
+    Returns:
+        Integer location index.
+    """
+    if hasattr(loc, "index"):
+        return int(loc.index)
+    return int(loc)
