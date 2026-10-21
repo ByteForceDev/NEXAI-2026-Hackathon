@@ -3,7 +3,7 @@ NEXAI 2026 Hackathon - Track 4: Supply Chain & Logistics
 Problem Statement 4.3: Last-Mile Route Planner with Live Re-planning (VRPTW)
 Optimization Engine: pyvroom (High-performance VROOM C++ Bindings)
 
-Interactive Dispatcher Dashboard with Real-Time Disruption Simulation.
+Interactive Dispatcher Dashboard with Autonomous Simulation Loop and Live Disruption Engine.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -47,7 +47,7 @@ st.markdown(
         border: 1px solid #334155;
         border-radius: 12px;
         padding: 1.2rem 1.5rem;
-        margin-bottom: 1.5rem;
+        margin-bottom: 1.2rem;
     }
     .badge {
         display: inline-block;
@@ -60,13 +60,7 @@ st.markdown(
     .badge-track { background-color: #0369a1; color: #e0f2fe; }
     .badge-problem { background-color: #065f46; color: #d1fae5; }
     .badge-engine { background-color: #6b21a8; color: #f3e8ff; }
-    .status-panel {
-        background-color: #1e293b;
-        border: 1px solid #334155;
-        border-radius: 8px;
-        padding: 0.8rem 1rem;
-        margin-bottom: 1rem;
-    }
+    .badge-status { background-color: #1e293b; border: 1px solid #475569; color: #f8fafc; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -108,6 +102,7 @@ def init_simulation_state() -> None:
             }
         )
         st.session_state.current_time = 0.0
+        st.session_state.is_simulating = False
         st.session_state.rush_order_count = 0
 
 
@@ -136,7 +131,6 @@ def get_node_coords(sim_state: SimulationState, loc_idx: int) -> Tuple[float, fl
 # ==============================================================================
 # 3. Plotly Route & Map Visualization
 # ==============================================================================
-# Curated high-contrast palette for route distinction
 ROUTE_COLORS = [
     "#38bdf8",  # Sky Blue
     "#f43f5e",  # Vibrant Rose
@@ -153,14 +147,10 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
     """
     Generate an interactive 2D spatial dispatch map with active routes and dynamic nodes.
     
-    Renders:
-      - Central Depot (gold square)
-      - Completed Customer stops (green circles)
-      - Pending Customer stops (blue circles)
-      - Dynamically Injected Rush Orders (orange diamonds)
-      - Vehicle Live Start Positions (purple markers)
-      - Broken / Disabled Vans (red X markers)
-      - Active Route paths (colored lines with step details)
+    Guarantees:
+      - At T = 0, all active vehicles are explicitly visible at the Central Depot.
+      - In transit, vehicle positions are continuous and mathematically interpolated.
+      - Disrupted vehicles are clearly rendered with failure tags.
     """
     fig = go.Figure()
 
@@ -218,9 +208,7 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
     # --------------------------------------------------------------------------
     # B. Plot Completed Nodes
     # --------------------------------------------------------------------------
-    completed_ids = set(sim_state.completed_jobs.keys())
     comp_x, comp_y, comp_hover = [], [], []
-
     for c_id, info in sim_state.completed_jobs.items():
         loc = info.get("location_index", 0)
         x, y = get_node_coords(sim_state, loc)
@@ -256,7 +244,7 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         )
 
     # --------------------------------------------------------------------------
-    # C. Plot Pending Regular Customers
+    # C. Plot Pending Regular Customers & Rush Orders
     # --------------------------------------------------------------------------
     pend_x, pend_y, pend_hover, pend_labels = [], [], [], []
     rush_x, rush_y, rush_hover, rush_labels = [], [], [], []
@@ -266,7 +254,6 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         x, y = get_node_coords(sim_state, loc_idx)
         is_rush = job_id >= 100
 
-        # Retrieve customer metadata if available
         meta = sim_state.customer_lookup.get(job_id)
         demand = meta.demand if meta else (job.delivery[0] if job.delivery else "-")
         ready_t = meta.ready_time if meta else "-"
@@ -333,62 +320,58 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         )
 
     # --------------------------------------------------------------------------
-    # D. Plot Vehicle Start Positions & Breakdowns
+    # D. Plot Interpolated Vehicle Positions (Smooth Kinematics)
     # --------------------------------------------------------------------------
-    active_van_x, active_van_y, active_van_hover, active_van_text = [], [], [], []
-    for v_id, v_state in sim_state.vehicles.items():
-        if v_id in sim_state.broken_vehicles:
-            continue
-        # Only show vans currently active in the route plan
-        if not routes_df.empty and v_id in routes_df["vehicle_id"].values:
-            vx, vy = get_node_coords(sim_state, v_state.start_location)
-            active_van_x.append(vx)
-            active_van_y.append(vy)
-            active_van_text.append(f"Van {v_id}")
-            active_van_hover.append(
+    veh_positions = sim_state.get_interpolated_vehicle_positions()
+    van_x, van_y, van_hover, van_labels = [], [], [], []
+    broken_x, broken_y, broken_hover, broken_labels = [], [], [], []
+
+    for v_id, p_info in veh_positions.items():
+        if p_info["is_broken"]:
+            broken_x.append(p_info["x"])
+            broken_y.append(p_info["y"])
+            broken_labels.append(f"💥 Van {v_id}")
+            broken_hover.append(
+                f"<b>Van #{v_id} [DISABLED / BREAKDOWN]</b><br>"
+                f"Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
+                f"Status: {p_info['status']}<br>"
+                f"<i>Unfinished stops re-assigned to active fleet!</i>"
+            )
+        elif p_info["is_active"]:
+            # Active in operation or pre-departure / shift completed
+            van_x.append(p_info["x"])
+            van_y.append(p_info["y"])
+            van_labels.append(f"Van {v_id}")
+            van_hover.append(
                 f"<b>Van #{v_id} [ACTIVE]</b><br>"
-                f"Current Location: ({vx:.1f}, {vy:.1f})<br>"
-                f"Remaining Capacity: {v_state.remaining_capacity} units<br>"
-                f"Completed Stops: {len(v_state.completed_job_ids)}"
+                f"Live Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
+                f"Status: {p_info['status']}<br>"
+                f"Remaining Capacity: {sim_state.vehicles[v_id].remaining_capacity} units<br>"
+                f"Completed Stops: {len(sim_state.vehicles[v_id].completed_job_ids)}"
             )
 
-    if active_van_x:
+    if van_x:
         fig.add_trace(
             go.Scatter(
-                x=active_van_x,
-                y=active_van_y,
+                x=van_x,
+                y=van_y,
                 mode="markers+text",
                 marker=dict(
                     symbol="triangle-up",
-                    size=15,
+                    size=16,
                     color="#c084fc",  # Purple
-                    line=dict(color="#ffffff", width=1.8),
+                    line=dict(color="#ffffff", width=2.0),
                 ),
-                text=active_van_text,
+                text=van_labels,
                 textposition="bottom right",
-                textfont=dict(size=10, color="#e9d5ff", family="sans-serif"),
+                textfont=dict(size=11, color="#f3e8ff", family="sans-serif"),
                 name="Van Live Positions",
                 hoverinfo="text",
-                hovertext=active_van_hover,
+                hovertext=van_hover,
             )
         )
 
-    # Plot Broken Vans
-    if sim_state.broken_vehicles:
-        broken_x, broken_y, broken_hover, broken_labels = [], [], [], []
-        for b_id in sim_state.broken_vehicles:
-            bv = sim_state.vehicles[b_id]
-            bx, by = get_node_coords(sim_state, bv.start_location)
-            broken_x.append(bx)
-            broken_y.append(by)
-            broken_labels.append(f"💥 Van {b_id} Disabled")
-            broken_hover.append(
-                f"<b>Van #{b_id} [DISABLED / BREAKDOWN]</b><br>"
-                f"Breakdown Location: ({bx:.1f}, {by:.1f})<br>"
-                f"Completed {len(bv.completed_job_ids)} stops before failure.<br>"
-                f"<i>Pending deliveries reassigned to fleet!</i>"
-            )
-
+    if broken_x:
         fig.add_trace(
             go.Scatter(
                 x=broken_x,
@@ -396,9 +379,9 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                 mode="markers+text",
                 marker=dict(
                     symbol="x",
-                    size=16,
+                    size=18,
                     color="#ef4444",  # Crimson Red
-                    line=dict(color="#ffffff", width=2.5),
+                    line=dict(color="#ffffff", width=2.8),
                 ),
                 text=broken_labels,
                 textposition="top center",
@@ -438,7 +421,7 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         )
     )
 
-    # Layout styling: sleek dark aesthetic with gridlines
+    # Layout styling: sleek dark aesthetic
     fig.update_layout(
         template="plotly_dark",
         paper_bgcolor="#0b0f17",
@@ -481,7 +464,59 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
 
 
 # ==============================================================================
-# 4. Main Dashboard Header
+# 4. KPI Placeholder Renderer
+# ==============================================================================
+def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
+    """Render high-contrast metric cards into the dedicated empty placeholder."""
+    unscaled_dist = sim_state.current_solution.summary.cost / float(sim_state.scale_factor)
+
+    routes_df = (
+        sim_state.current_solution.routes
+        if hasattr(sim_state.current_solution, "routes") and isinstance(sim_state.current_solution.routes, pd.DataFrame)
+        else pd.DataFrame()
+    )
+    active_in_transit = len(routes_df["vehicle_id"].unique()) if not routes_df.empty else 0
+    total_active_fleet = len(sim_state.vehicles) - len(sim_state.broken_vehicles)
+
+    pending_cnt = len(sim_state.pending_jobs)
+    comp_cnt = len(sim_state.completed_jobs)
+
+    latest_runtime = (
+        sim_state.replanning_history[-1]["runtime_ms"]
+        if sim_state.replanning_history
+        else 0.0
+    )
+
+    is_done = sim_state.is_simulation_completed()
+    clock_status = "FINISHED" if is_done else ("SIMULATING" if st.session_state.is_simulating else "PAUSED")
+
+    with placeholder.container():
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(
+            label="Total Travel Distance",
+            value=f"{unscaled_dist:.1f} km",
+            delta=f"Clock: T = {st.session_state.current_time:.1f} [{clock_status}]",
+        )
+        m2.metric(
+            label="Active Fleet in Transit",
+            value=f"{active_in_transit} Vans",
+            delta=f"{total_active_fleet} Total Operational",
+        )
+        m3.metric(
+            label="Pending Deliveries",
+            value=f"{pending_cnt} Stops",
+            delta=f"{comp_cnt} Completed",
+            delta_color="inverse",
+        )
+        m4.metric(
+            label="Last Re-plan Latency",
+            value=f"{latest_runtime:.2f} ms",
+            delta="Sub-5ms Guaranteed",
+        )
+
+
+# ==============================================================================
+# 5. Dashboard Header
 # ==============================================================================
 st.markdown(
     """
@@ -501,73 +536,29 @@ st.markdown(
 
 
 # ==============================================================================
-# 5. Sidebar: Setup & Live KPIs
+# 6. Sidebar: Setup & Simulation Summary
 # ==============================================================================
 with st.sidebar:
     st.title("Dispatch Controls")
     st.markdown("---")
 
-    # Current Virtual Clock Status
-    st.markdown("### ⏱️ Virtual Dispatch Clock")
-    col_clock1, col_clock2 = st.columns(2)
-    with col_clock1:
+    st.markdown("### ⏱️ Virtual Clock")
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
         st.caption("Current Time")
         st.subheader(f"T = {st.session_state.current_time:.1f}")
-    with col_clock2:
+    with col_c2:
         st.caption("Depot Horizon")
         st.subheader(f"T = {sim.instance.depot.due_date:.0f}")
 
     st.markdown("---")
-    st.markdown("### 📊 Operational KPIs")
-
-    # 1. Total Distance (unscaled)
-    unscaled_distance = sim.current_solution.summary.cost / float(sim.scale_factor)
-    st.metric(
-        label="Total Travel Distance",
-        value=f"{unscaled_distance:.1f} units",
-        delta=f"Cost: {sim.current_solution.summary.cost}",
-    )
-
-    # 2. Active Vehicles
-    routes_df = (
-        sim.current_solution.routes
-        if hasattr(sim.current_solution, "routes") and isinstance(sim.current_solution.routes, pd.DataFrame)
-        else pd.DataFrame()
-    )
-    active_vehicles_count = (
-        len(routes_df["vehicle_id"].unique()) if not routes_df.empty else 0
-    )
-    total_active_fleet = len(sim.vehicles) - len(sim.broken_vehicles)
-    st.metric(
-        label="Active Fleet in Transit",
-        value=f"{active_vehicles_count} Vans",
-        delta=f"{total_active_fleet} Total Available",
-    )
-
-    # 3. Pending/Unserved Jobs
-    pending_count = len(sim.pending_jobs)
-    completed_count = len(sim.completed_jobs)
-    st.metric(
-        label="Pending Deliveries",
-        value=f"{pending_count} Stops",
-        delta=f"-{completed_count} Completed",
-        delta_color="inverse",
-    )
-
-    # 4. Last Re-plan Compute Time
-    latest_runtime = (
-        sim.replanning_history[-1]["runtime_ms"]
-        if sim.replanning_history
-        else 0.0
-    )
-    st.metric(
-        label="Last Re-plan Compute Time",
-        value=f"{latest_runtime:.2f} ms",
-        delta="Sub-5ms Guaranteed",
-    )
+    st.markdown("### 🚐 Fleet Status")
+    st.write(f"**Total Fleet:** {len(sim.vehicles)} Vans")
+    st.write(f"**Operational:** {len(sim.vehicles) - len(sim.broken_vehicles)} Vans")
+    st.write(f"**Disabled / Broken:** {len(sim.broken_vehicles)} Vans")
+    st.write(f"**Completed Deliveries:** {len(sim.completed_jobs)} / {sim.instance.num_customers}")
 
     st.markdown("---")
-    # Reset Simulation Button
     if st.button("🔄 Reset Simulation to Baseline", use_container_width=True):
         st.session_state.clear()
         init_simulation_state()
@@ -575,120 +566,111 @@ with st.sidebar:
 
 
 # ==============================================================================
-# 6. Main View: Map Visualization (Plotly)
+# 7. Live Display Placeholders (Dynamic Updates without Page Reload)
 # ==============================================================================
-map_figure = plot_routes(sim)
-st.plotly_chart(map_figure, use_container_width=True)
+kpi_placeholder = st.empty()
+render_kpi_metrics(kpi_placeholder, sim)
+
+map_placeholder = st.empty()
+map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
 
 
 # ==============================================================================
-# 7. Simulation Controls (Disruption Triggers)
+# 8. Simulation Controls (Disruption Triggers & Autonomous Loop)
 # ==============================================================================
 st.markdown("### ⚡ Live Disruption & Simulation Controls")
-col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.5, 1.2, 1.3], gap="medium")
+col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.6, 1.2, 1.2], gap="medium")
 
-# --- Column 1: Time Slider & Clock Advance ---
+# --- Column 1: Autonomous Loop Controls ---
 with col_ctrl1:
-    st.markdown("**1. Advance Simulation Clock**")
-    slider_val = st.slider(
-        "Move clock forward (T_event):",
-        min_value=0.0,
-        max_value=1000.0,
-        value=float(st.session_state.current_time),
-        step=25.0,
-        key="time_slider",
-    )
-    if st.button("⏩ Advance Time", use_container_width=True):
-        if slider_val > st.session_state.current_time:
-            adv_summary = sim.advance_clock(slider_val)
-            st.session_state.current_time = slider_val
-            st.toast(
-                f"Clock advanced to T={slider_val:.1f}! {adv_summary['newly_completed_count']} stops completed.",
-                icon="⏱️",
-            )
+    st.markdown("**1. Autonomous Simulation**")
+    c_play, c_pause, c_step = st.columns(3)
+    with c_play:
+        if st.button("▶️ Start / Resume", use_container_width=True, type="primary"):
+            if not sim.is_simulation_completed():
+                st.session_state.is_simulating = True
+                st.rerun()
+            else:
+                st.info("Simulation completed. Reset to run again.")
+    with c_pause:
+        if st.button("⏸️ Pause", use_container_width=True):
+            st.session_state.is_simulating = False
             st.rerun()
-        elif slider_val < st.session_state.current_time:
-            st.warning("Clock cannot move backwards in time.")
-        else:
-            st.info("Time slider is already at current simulation time.")
+    with c_step:
+        if st.button("⏭️ Step (+25)", use_container_width=True):
+            st.session_state.is_simulating = False
+            if not sim.is_simulation_completed():
+                next_t = min(st.session_state.current_time + 25.0, float(sim.instance.depot.due_date))
+                sim.advance_clock(next_t)
+                st.session_state.current_time = next_t
+            st.rerun()
 
 # --- Column 2: Vehicle Breakdown Disruption ---
 with col_ctrl2:
     st.markdown("**2. Mechanical Disruption**")
-    st.caption("Abrupt failure triggers immediate mid-route re-routing.")
     van_1_broken = 1 in sim.broken_vehicles
     btn_label = "🚨 Van 1 Already Disabled" if van_1_broken else "🚨 Trigger Van 1 Breakdown"
 
-    if st.button(
-        btn_label,
-        use_container_width=True,
-        type="primary" if not van_1_broken else "secondary",
-        disabled=van_1_broken,
-    ):
-        with st.spinner("Processing breakdown & hot re-planning..."):
-            sim.trigger_breakdown(1)
+    if st.button(btn_label, use_container_width=True, disabled=van_1_broken):
+        st.session_state.is_simulating = False
+        res = sim.trigger_breakdown(1)
+        if res.get("status") == "already_completed":
+            st.info(res.get("message"))
+        else:
             sim.replan(exploration_level=1)
-            runtime = sim.replanning_history[-1]["runtime_ms"]
-            st.toast(
-                f"🚨 Van 1 breakdown handled! Reassigned in {runtime:.2f} ms.",
-                icon="⚠️",
-            )
-            st.rerun()
+            rt = sim.replanning_history[-1]["runtime_ms"]
+            st.toast(f"🚨 Van 1 breakdown handled! Re-routed in {rt:.2f} ms.", icon="⚠️")
+        st.rerun()
 
 # --- Column 3: Rush Order Injection ---
 with col_ctrl3:
     st.markdown("**3. Dynamic Customer Demand**")
-    st.caption("Inject urgent mid-day delivery requests into pending pool.")
+    if st.button("⚡ Inject Rush Orders (x3)", use_container_width=True):
+        st.session_state.is_simulating = False
+        st.session_state.rush_order_count += 1
+        offset = st.session_state.rush_order_count * 10
+        cur_t = float(st.session_state.current_time)
 
-    if st.button("📦 Inject Rush Orders (x3)", use_container_width=True):
-        with st.spinner("Expanding coordinate matrix & re-planning..."):
-            st.session_state.rush_order_count += 1
-            offset = st.session_state.rush_order_count * 10
-            cur_t = float(st.session_state.current_time)
+        # Three realistic customer orders with distinct coordinates
+        rush_orders = [
+            {
+                "cust_no": 100 + offset + 1,
+                "x": 38.0,
+                "y": 55.0,
+                "demand": 15,
+                "ready_time": max(cur_t, 250.0),
+                "due_date": min(cur_t + 500.0, 1100.0),
+                "service_time": 90.0,
+            },
+            {
+                "cust_no": 100 + offset + 2,
+                "x": 28.0,
+                "y": 70.0,
+                "demand": 20,
+                "ready_time": max(cur_t, 280.0),
+                "due_date": min(cur_t + 550.0, 1150.0),
+                "service_time": 90.0,
+            },
+            {
+                "cust_no": 100 + offset + 3,
+                "x": 48.0,
+                "y": 45.0,
+                "demand": 10,
+                "ready_time": max(cur_t, 200.0),
+                "due_date": min(cur_t + 600.0, 1200.0),
+                "service_time": 90.0,
+            },
+        ]
 
-            # Three realistic customer orders with distinct coordinates
-            rush_orders = [
-                {
-                    "cust_no": 100 + offset + 1,
-                    "x": 38.0,
-                    "y": 55.0,
-                    "demand": 15,
-                    "ready_time": max(cur_t, 250.0),
-                    "due_date": min(cur_t + 500.0, 1100.0),
-                    "service_time": 90.0,
-                },
-                {
-                    "cust_no": 100 + offset + 2,
-                    "x": 28.0,
-                    "y": 70.0,
-                    "demand": 20,
-                    "ready_time": max(cur_t, 280.0),
-                    "due_date": min(cur_t + 550.0, 1150.0),
-                    "service_time": 90.0,
-                },
-                {
-                    "cust_no": 100 + offset + 3,
-                    "x": 48.0,
-                    "y": 45.0,
-                    "demand": 10,
-                    "ready_time": max(cur_t, 200.0),
-                    "due_date": min(cur_t + 600.0, 1200.0),
-                    "service_time": 90.0,
-                },
-            ]
-
-            injected_ids = sim.inject_new_orders(rush_orders)
-            sim.replan(exploration_level=1)
-            runtime = sim.replanning_history[-1]["runtime_ms"]
-            st.toast(
-                f"⚡ Injected {len(injected_ids)} rush stops! Fleet re-routed in {runtime:.2f} ms.",
-                icon="🚀",
-            )
-            st.rerun()
+        injected = sim.inject_new_orders(rush_orders)
+        sim.replan(exploration_level=1)
+        rt = sim.replanning_history[-1]["runtime_ms"]
+        st.toast(f"⚡ Injected {len(injected)} rush stops! Fleet re-routed in {rt:.2f} ms.", icon="🚀")
+        st.rerun()
 
 
 # ==============================================================================
-# 8. Detailed Telemetry & Fleet Manifest Tabs
+# 9. Detailed Telemetry & Fleet Manifest Tabs
 # ==============================================================================
 st.markdown("---")
 tab_routes, tab_telemetry, tab_fleet = st.tabs(
@@ -696,8 +678,12 @@ tab_routes, tab_telemetry, tab_fleet = st.tabs(
 )
 
 with tab_routes:
+    routes_df = (
+        sim.current_solution.routes
+        if hasattr(sim.current_solution, "routes") and isinstance(sim.current_solution.routes, pd.DataFrame)
+        else pd.DataFrame()
+    )
     if not routes_df.empty:
-        # Format human-friendly route inspection table
         display_df = routes_df.copy()
         display_df["arrival_time"] = display_df["arrival"].apply(
             lambda v: f"{unscale_value(v, sim.scale_factor):.1f}"
@@ -764,18 +750,52 @@ with tab_telemetry:
 
 with tab_fleet:
     fleet_rows = []
+    veh_pos = sim.get_interpolated_vehicle_positions()
     for vid, vstate in sim.vehicles.items():
-        # Only show vehicles with activity or first 10 reserve vehicles
         if vid <= 5 or vstate.completed_job_ids or vstate.is_broken:
-            loc_x, loc_y = get_node_coords(sim, vstate.start_location)
+            pinfo = veh_pos.get(vid, {})
             fleet_rows.append(
                 {
                     "Vehicle ID": vid,
-                    "Status": "DISABLED" if vstate.is_broken else "OPERATIONAL",
-                    "Current Location": f"({loc_x:.1f}, {loc_y:.1f}) [Node {vstate.start_location}]",
+                    "Operational Status": "DISABLED" if vstate.is_broken else "OPERATIONAL",
+                    "Live Status": pinfo.get("status", "Unknown"),
+                    "Current Location": f"({pinfo.get('x', 0.0):.1f}, {pinfo.get('y', 0.0):.1f})",
                     "Remaining Capacity": f"{vstate.remaining_capacity} / {sim.instance.vehicle_capacity}",
                     "Available From (T)": f"{unscale_value(vstate.available_from, sim.scale_factor):.1f}",
                     "Completed Stops": len(vstate.completed_job_ids),
                 }
             )
     st.dataframe(pd.DataFrame(fleet_rows), use_container_width=True, hide_index=True)
+
+
+# ==============================================================================
+# 10. Autonomous Execution Loop (Dynamic Placeholders Update)
+# ==============================================================================
+if st.session_state.is_simulating:
+    while st.session_state.is_simulating:
+        # Check termination condition: all deliveries done and vans at depot
+        if sim.is_simulation_completed():
+            st.session_state.is_simulating = False
+            render_kpi_metrics(kpi_placeholder, sim)
+            map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
+            st.toast("🎉 All customer deliveries completed! Fleet returned to depot.", icon="🏁")
+            st.rerun()
+
+        # Advance virtual clock by 10.0 units
+        next_t = min(
+            st.session_state.current_time + 10.0,
+            float(sim.instance.depot.due_date),
+        )
+        sim.advance_clock(next_t)
+        st.session_state.current_time = next_t
+
+        # Dynamically update UI placeholders without full page reload
+        render_kpi_metrics(kpi_placeholder, sim)
+        map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
+
+        if sim.is_simulation_completed():
+            st.session_state.is_simulating = False
+            st.toast("🎉 All customer deliveries completed! Fleet returned to depot.", icon="🏁")
+            st.rerun()
+
+        time.sleep(0.2)

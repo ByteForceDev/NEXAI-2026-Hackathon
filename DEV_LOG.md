@@ -95,6 +95,20 @@
 
 ---
 
+### ADR 007: Autonomous Temporal Loop, Kinematic Van Interpolation, and System Edge-Case Hardening
+* **Status:** Accepted
+* **Context:**
+  Manual time slider interactions were replaced with an autonomous simulation loop running to completion. In addition, fleet vans were invisible at $T=0$ prior to completing their first stop, and three critical operational edge cases required mathematical hardening: late disruptions on completed vans, post-shift rush order injections, and zero-task solver exceptions at end-of-day.
+* **Decision:**
+  Implement an autonomous simulation engine with real-time kinematic interpolation and strict boundary guardrails:
+  1. **Dynamic Placeholder Loop:** `st.empty()` metric and map placeholders allow real-time UI animation without triggering full Streamlit page reloads. The loop advances at $\Delta T = 10.0$ per tick with a smooth $0.2\text{s}$ pause, terminating autonomously when `sim.is_simulation_completed()` evaluates to True.
+  2. **Spatial-Temporal Kinematic Interpolation:** In `get_interpolated_vehicle_positions()`, active vans are explicitly pinned to the Central Depot $(40, 50)$ at $T=0$ (resolving the initial visibility bug). During inter-stop transit ($D_A < T < A_B$), continuous coordinates are derived via linear interpolation $\alpha = \frac{T - D_A}{A_B - D_A}$, smoothly animating van movement across the spatial grid.
+  3. **Edge Case A (Late Disruption):** `trigger_breakdown()` checks if the target vehicle has already completed its shift (`is_completed_route` or `is_returned_to_depot`). If so, the failure is safely ignored with an informational notice, preserving operational stability.
+  4. **Edge Case B (Post-Completion Injection):** When vehicles arrive at the depot ($T_{\text{event}} \ge T_{\text{end}}$), their start locations reset to Node 0, available times align with $T_{\text{event}}$, and capacity reloads to $200$. When late rush orders are injected, `replan()` automatically awakens and dispatches returned or reserve fleet vans from the depot.
+  5. **Edge Case C (Safe Slicing & Zero-Task Solver Guard):** If $T_{\text{event}}$ exceeds the operational horizon, all jobs complete smoothly without indexing faults. When $0$ pending jobs remain, `replan()` safely bypasses `pyvroom.Input.solve()` to prevent C++ `VroomInputException: No task defined` faults.
+
+---
+
 ## 2. Experiments & Benchmarks
 
 | Experiment ID | Date | Instance | Nodes | Engine | Exploration Level | Threads | Runtime | Solution Status |
@@ -103,6 +117,7 @@
 | EXP-002 | 2026-10-21 | Solomon C101-25 | 26 | pyvroom 1.15.2 | 1 | 2 | ~80 ms | Verified (Cost: 19183, 3 Routes) |
 | EXP-003 | 2026-10-21 | C101-25 Disruption (T=300, breakdown + new order) | 27 | pyvroom 1.15.2 | 1 | 2 | ~3.5 ms | Verified (Cost: 15430, 3 Active Routes) |
 | EXP-004 | 2026-10-21 | Streamlit + Plotly Interactive Dashboard End-to-End | 29 | pyvroom 1.15.2 | 1 | 2 | ~4.0 ms | Verified (Full UI state persistence & live reruns) |
+| EXP-005 | 2026-10-21 | Autonomous Simulation Loop & Edge Cases A, B, C | 27 | pyvroom 1.15.2 | 1 | 2 | ~1.6 ms | Verified (Depot van wakeup, interpolation, safe slicing) |
 
 ---
 
@@ -115,4 +130,5 @@
 | Solomon Parser & Solver | Authored parsing algorithm for Solomon VRPTW format, scaling pipeline, Euclidean integer distance matrix calculator, and VROOM input problem generator. | Validated coordinate scaling and data integrity against standard Solomon C101 specifications. |
 | Step 2 Simulation Engine & Live Re-planning | Designed `SimulationState` manager, mid-route route slicing at $T_{\text{event}}$, vehicle kinematic translation, dynamic matrix expansion for new orders, vehicle breakdown reassignment, and sub-5ms re-planning. | Executed full automated integration verification suite testing simultaneous vehicle breakdown and order injection. |
 | Step 3 Interactive Dispatcher Dashboard | Engineered enterprise Streamlit frontend (`app.py`), session state persistence model, Plotly 2D spatial dispatch map with custom node markers, live KPI telemetry, and disruption control suite. | Validated end-to-end frontend workflows, coordinate inversion, and disruption re-planning cycles. |
+| Simulation Loop Upgrade & Hardening | Built autonomous animation loop using `st.empty()` placeholders, continuous spatial interpolation for van markers at $T \ge 0$, and mathematical hardening against Edge Cases A, B, and C. | Validated through automated test suite `tests/test_simulation_upgrade.py` covering late disruptions, post-shift injections, and zero-task safeguards. |
 

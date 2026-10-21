@@ -54,6 +54,9 @@ class VehicleState:
     last_completed_job_id: Optional[int] = None
     last_completed_location: int = 0
     last_completion_time: int = 0
+    route_end_time: int = 0
+    is_returned_to_depot: bool = False
+    is_completed_route: bool = False
     is_broken: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -67,6 +70,9 @@ class VehicleState:
             "last_completed_job_id": self.last_completed_job_id,
             "last_completed_location": self.last_completed_location,
             "last_completion_time": self.last_completion_time,
+            "route_end_time": self.route_end_time,
+            "is_returned_to_depot": self.is_returned_to_depot,
+            "is_completed_route": self.is_completed_route,
             "is_broken": self.is_broken,
         }
 
@@ -262,8 +268,32 @@ class SimulationState:
                                 ],
                             )
 
+        # Map route end times and steps per vehicle from active routes
+        route_end_times: Dict[int, int] = {}
+        for r in routes_data:
+            vid = int(r["vehicle_id"])
+            steps = r.get("steps", [])
+            if steps:
+                end_step = steps[-1]
+                route_end_times[vid] = int(end_step.get("arrival", 0))
+
         # Update mid-route vehicle states across entire fleet
         for v_id, v_state in self.vehicles.items():
+            route_end = route_end_times.get(v_id)
+            if route_end is not None:
+                v_state.route_end_time = route_end
+                if T_event >= route_end:
+                    # Edge Case B & C: Van has returned to Depot: shift complete, ready to reload for new dispatches!
+                    v_state.start_location = 0
+                    v_state.is_returned_to_depot = True
+                    v_state.is_completed_route = True
+                    v_state.available_from = max(T_event, route_end)
+                    v_state.remaining_capacity = int(self.instance.vehicle_capacity)
+                    continue
+
+            # Vehicle is en route or idle at depot
+            v_state.is_returned_to_depot = False
+            v_state.is_completed_route = False
             if v_state.last_completed_job_id is not None:
                 # Van is located at its last completed customer location
                 v_state.start_location = v_state.last_completed_location
@@ -448,21 +478,52 @@ class SimulationState:
             Dictionary confirmation with affected vehicle status.
         """
         if vehicle_id not in self.vehicles:
-            raise ValueError(f"Vehicle ID {vehicle_id} not found in fleet.")
+            logger.warning("Vehicle ID %d not found in fleet.", vehicle_id)
+            return {
+                "vehicle_id": vehicle_id,
+                "status": "not_found",
+                "message": f"Vehicle {vehicle_id} is not in the fleet.",
+            }
+
+        v_state = self.vehicles[vehicle_id]
+
+        # Edge Case A: Check if vehicle has already completed its route and returned to depot
+        if v_state.is_completed_route or v_state.is_returned_to_depot:
+            logger.info(
+                "Vehicle %d breakdown ignored: vehicle has already completed its route and returned to depot.",
+                vehicle_id,
+            )
+            return {
+                "vehicle_id": vehicle_id,
+                "status": "already_completed",
+                "message": f"Van #{vehicle_id} has already completed its shift and safely returned to depot. Breakdown ignored.",
+                "completed_jobs": list(v_state.completed_job_ids),
+                "pending_jobs_to_reassign": 0,
+            }
+
+        if v_state.is_broken or vehicle_id in self.broken_vehicles:
+            return {
+                "vehicle_id": vehicle_id,
+                "status": "already_broken",
+                "message": f"Van #{vehicle_id} is already disabled.",
+                "completed_jobs": list(v_state.completed_job_ids),
+                "pending_jobs_to_reassign": len(self.pending_jobs),
+            }
 
         self.broken_vehicles.add(vehicle_id)
-        self.vehicles[vehicle_id].is_broken = True
+        v_state.is_broken = True
 
         logger.warning(
             "Vehicle %d breakdown triggered! Removed from dispatch. Completed jobs: %s",
             vehicle_id,
-            self.vehicles[vehicle_id].completed_job_ids,
+            v_state.completed_job_ids,
         )
 
         return {
             "vehicle_id": vehicle_id,
             "status": "disabled",
-            "completed_jobs": list(self.vehicles[vehicle_id].completed_job_ids),
+            "message": f"Van #{vehicle_id} broken down at node {v_state.start_location}. Unfinished stops re-pooled.",
+            "completed_jobs": list(v_state.completed_job_ids),
             "pending_jobs_to_reassign": len(self.pending_jobs),
         }
 
@@ -534,9 +595,24 @@ class SimulationState:
 
         problem.add_vehicle(active_vehicles)
 
-        # 3. Add all pending jobs
-        if self.pending_jobs:
-            problem.add_job(list(self.pending_jobs.values()))
+        # 3. Add all pending jobs (Edge Case C: handle 0 pending jobs safely)
+        if not self.pending_jobs:
+            logger.info("All deliveries completed: 0 pending jobs. No re-plan required.")
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            telemetry = {
+                "timestamp_scaled": self.current_time,
+                "timestamp_unscaled": unscale_value(self.current_time, self.scale_factor),
+                "runtime_ms": round(elapsed_ms, 2),
+                "cost": 0,
+                "routes_count": 0,
+                "total_steps": 0,
+                "pending_jobs_count": 0,
+                "active_vehicles_count": len(active_vehicles),
+            }
+            self.replanning_history.append(telemetry)
+            return self.current_solution
+
+        problem.add_job(list(self.pending_jobs.values()))
 
         # 4. Invoke pyvroom optimization engine
         solution = problem.solve(exploration_level=exploration_level, nb_threads=nb_threads)
@@ -590,3 +666,225 @@ class SimulationState:
                 else None
             ),
         }
+
+    def is_simulation_completed(self) -> bool:
+        """
+        Check if all deliveries are completed and all active vehicles have returned to the depot.
+        
+        Returns:
+            True if 0 pending jobs remain and all active fleet routes have finished.
+        """
+        if len(self.pending_jobs) > 0:
+            return False
+
+        routes_data = self._extract_routes_data()
+        if not routes_data:
+            return True
+
+        for r in routes_data:
+            v_id = int(r["vehicle_id"])
+            if v_id in self.broken_vehicles:
+                continue
+            steps = r.get("steps", [])
+            if steps:
+                final_step = steps[-1]
+                end_arr = int(final_step.get("arrival", 0))
+                if self.current_time < end_arr:
+                    return False
+
+        return True
+
+    def get_interpolated_vehicle_positions(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Calculate mathematically continuous interpolated (X, Y) positions for all fleet vehicles.
+        
+        Guarantees that at T = 0 or before departure, all vehicles are positioned explicitly at the Depot.
+        When in transit between steps A and B, calculates travel fraction alpha = (T - dep_A) / (arr_B - dep_A)
+        and linearly interpolates between node coordinates for smooth animation.
+        
+        Returns:
+            Dict mapping vehicle_id -> dict with 'x', 'y', 'status', 'is_broken', 'is_active', 'location_index'.
+        """
+        positions: Dict[int, Dict[str, Any]] = {}
+        depot_x, depot_y = self.instance.depot.x, self.instance.depot.y
+        t_curr = self.current_time
+
+        routes_data = self._extract_routes_data()
+        routes_by_veh = {int(r["vehicle_id"]): r.get("steps", []) for r in routes_data}
+
+        for v_id, v_state in self.vehicles.items():
+            if v_id in self.broken_vehicles or v_state.is_broken:
+                # Disabled vehicle pinned at its breakdown location
+                loc_idx = (
+                    v_state.last_completed_location
+                    if v_state.last_completed_location is not None
+                    else v_state.start_location
+                )
+                if loc_idx == 0:
+                    pos = (depot_x, depot_y)
+                else:
+                    sx, sy = self.scaled_coordinates[loc_idx]
+                    pos = (
+                        unscale_value(sx, self.scale_factor),
+                        unscale_value(sy, self.scale_factor),
+                    )
+                positions[v_id] = {
+                    "x": pos[0],
+                    "y": pos[1],
+                    "status": "DISABLED / BREAKDOWN",
+                    "is_broken": True,
+                    "is_active": False,
+                    "location_index": loc_idx,
+                }
+                continue
+
+            v_steps = routes_by_veh.get(v_id, [])
+            if not v_steps:
+                # Reserve idle vehicle at Depot
+                positions[v_id] = {
+                    "x": depot_x,
+                    "y": depot_y,
+                    "status": "At Depot (Reserve Fleet)",
+                    "is_broken": False,
+                    "is_active": False,
+                    "location_index": 0,
+                }
+                continue
+
+            first_step = v_steps[0]
+            last_step = v_steps[-1]
+            first_arr = int(first_step.get("arrival", 0))
+            last_arr = int(last_step.get("arrival", 0))
+
+            if t_curr <= first_arr:
+                # Pre-departure: explicitly at Depot
+                positions[v_id] = {
+                    "x": depot_x,
+                    "y": depot_y,
+                    "status": "At Depot (Pre-departure)",
+                    "is_broken": False,
+                    "is_active": True,
+                    "location_index": 0,
+                }
+            elif t_curr >= last_arr:
+                # Returned to Depot: shift complete
+                positions[v_id] = {
+                    "x": depot_x,
+                    "y": depot_y,
+                    "status": "At Depot (Shift Completed)",
+                    "is_broken": False,
+                    "is_active": True,
+                    "location_index": 0,
+                }
+            else:
+                matched = False
+                for i in range(len(v_steps) - 1):
+                    s_curr = v_steps[i]
+                    s_next = v_steps[i + 1]
+
+                    arr_curr = int(s_curr.get("arrival", 0))
+                    serv_curr = int(s_curr.get("service", 0))
+                    wait_curr = int(s_curr.get("waiting_time", 0))
+                    dep_curr = arr_curr + wait_curr + serv_curr
+
+                    arr_next = int(s_next.get("arrival", 0))
+
+                    loc_curr = int(s_curr.get("location_index", 0))
+                    loc_next = int(s_next.get("location_index", 0))
+
+                    # Case A: At current stop (waiting or servicing)
+                    if arr_curr <= t_curr <= dep_curr:
+                        if loc_curr == 0:
+                            c_curr = (depot_x, depot_y)
+                        else:
+                            sx, sy = self.scaled_coordinates[loc_curr]
+                            c_curr = (
+                                unscale_value(sx, self.scale_factor),
+                                unscale_value(sy, self.scale_factor),
+                            )
+
+                        job_label = (
+                            f"Stop #{s_curr.get('id')}"
+                            if s_curr.get("id") is not None
+                            else "Depot"
+                        )
+                        positions[v_id] = {
+                            "x": c_curr[0],
+                            "y": c_curr[1],
+                            "status": f"At {job_label} (Servicing/Waiting)",
+                            "is_broken": False,
+                            "is_active": True,
+                            "location_index": loc_curr,
+                        }
+                        matched = True
+                        break
+
+                    # Case B: In transit between s_curr and s_next
+                    elif dep_curr < t_curr < arr_next:
+                        if loc_curr == 0:
+                            c_curr = (depot_x, depot_y)
+                        else:
+                            sx, sy = self.scaled_coordinates[loc_curr]
+                            c_curr = (
+                                unscale_value(sx, self.scale_factor),
+                                unscale_value(sy, self.scale_factor),
+                            )
+
+                        if loc_next == 0:
+                            c_next = (depot_x, depot_y)
+                        else:
+                            sx, sy = self.scaled_coordinates[loc_next]
+                            c_next = (
+                                unscale_value(sx, self.scale_factor),
+                                unscale_value(sy, self.scale_factor),
+                            )
+
+                        dt = arr_next - dep_curr
+                        alpha = (t_curr - dep_curr) / dt if dt > 0 else 0.0
+                        alpha = max(0.0, min(1.0, alpha))
+
+                        interp_x = c_curr[0] + alpha * (c_next[0] - c_curr[0])
+                        interp_y = c_curr[1] + alpha * (c_next[1] - c_curr[1])
+
+                        from_lbl = (
+                            f"#{s_curr.get('id')}"
+                            if s_curr.get("id") is not None
+                            else "Depot"
+                        )
+                        to_lbl = (
+                            f"#{s_next.get('id')}"
+                            if s_next.get("id") is not None
+                            else "Depot"
+                        )
+
+                        positions[v_id] = {
+                            "x": interp_x,
+                            "y": interp_y,
+                            "status": f"In Transit: {from_lbl} ➔ {to_lbl} ({alpha*100:.0f}%)",
+                            "is_broken": False,
+                            "is_active": True,
+                            "location_index": loc_curr,
+                        }
+                        matched = True
+                        break
+
+                if not matched:
+                    loc_idx = v_state.start_location
+                    if loc_idx == 0:
+                        pos = (depot_x, depot_y)
+                    else:
+                        sx, sy = self.scaled_coordinates[loc_idx]
+                        pos = (
+                            unscale_value(sx, self.scale_factor),
+                            unscale_value(sy, self.scale_factor),
+                        )
+                    positions[v_id] = {
+                        "x": pos[0],
+                        "y": pos[1],
+                        "status": "In Operation",
+                        "is_broken": False,
+                        "is_active": True,
+                        "location_index": loc_idx,
+                    }
+
+        return positions
