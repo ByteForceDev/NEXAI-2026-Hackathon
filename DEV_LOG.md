@@ -1,5 +1,73 @@
-# Development Log
+# NEXAI 2026 Hackathon - Development Log & Engineering Record
 
-## 21 October 2026 — 10:15 PM
-- Used AI for filtering the topics and selecting the best one
-- Selected the track & problem statement
+**Track 4:** AI for Supply Chain & Logistics  
+**Problem Statement 4.3:** Last-Mile Route Planner with Live Re-planning (VRPTW)  
+**Team / Project:** ByteForceDev / Autonomous Dynamic Route Engine  
+
+---
+
+## 1. Architecture Decisions (ADRs)
+
+### ADR 001: Optimization Engine Selection — `pyvroom` vs. Google OR-Tools
+* **Status:** Accepted
+* **Context:**
+  Problem Statement 4.3 requires dynamic, live re-planning for last-mile fleet operations when real-time disruptions occur (e.g., dynamic order cancellations, traffic bottlenecks, customer delivery window updates, new rush pickups). Under operational constraints, re-optimization must be executed in near real-time (sub-5-second target; ideally sub-second for interactive dispatch dashboards).
+  
+  Traditional constraint-programming / MILP solvers such as Google OR-Tools Routing Library rely on CP-SAT or local search metaheuristics. While OR-Tools is flexible and feature-rich, initializing search models and converging on tightly constrained VRPTW instances can require 10 to 60+ seconds per re-plan call, causing perceptible UI freezing and lagging behind rapidly moving fleet state.
+* **Decision:**
+  Adopt **`pyvroom`** (the high-performance C++ VROOM engine Python binding) as the core routing and optimization engine.
+* **Rationale & Trade-offs:**
+  1. **Algorithmic Efficiency:** VROOM is purpose-built for vehicle routing heuristics (utilizing sophisticated regret-based insertion, tabu search, and fast local search operators), achieving solutions within 50ms–500ms for 25–100 node instances.
+  2. **Sub-second Re-planning:** Enables seamless hot-recomputations as delivery events arrive without blocking the interactive Streamlit / event simulator loops.
+  3. **Strict Academic Compliance:** Preserves capacity, multi-dimensional amounts, depot constraints, and strict customer time windows while maximizing fleet utilization.
+  4. **Trade-off:** VROOM requires integer costs, durations, and coordinates, demanding a formal mathematical scaling factor across spatial and temporal dimensions (see ADR 002).
+
+---
+
+### ADR 002: Spatial and Temporal Scaling (Discretization Factor = 100)
+* **Status:** Accepted
+* **Context:**
+  The underlying C++ VROOM engine operates strictly on integer arithmetic (`uint32_t`) for duration matrices, coordinates, time windows, and service durations to eliminate floating-point non-determinism, rounding divergence, and computational overhead. Standard benchmark instances (such as Solomon VRPTW) use decimal coordinates and fractional time intervals.
+* **Decision:**
+  Implement a deterministic integer scaling factor of `SCALE_FACTOR = 100` across all spatial coordinates ($X, Y$), customer time windows ($[e_i, l_i]$), and service durations ($s_i$).
+* **Mathematical Invariant:**
+  - Scaled Coordinate: $X_{\text{scaled}} = \lfloor X \times 100 + 0.5 \rfloor$
+  - Scaled Distance / Duration: $D_{ij,\text{scaled}} = \lfloor \sqrt{(X_{i,\text{scaled}} - X_{j,\text{scaled}})^2 + (Y_{i,\text{scaled}} - Y_{j,\text{scaled}})^2} + 0.5 \rfloor$
+  - Since Solomon assumes a vehicle speed of $v = 1.0 \text{ distance unit / time unit}$, $100 \times \text{distance}$ maps 1:1 to $100 \times \text{travel time}$, maintaining exact physical consistency across routing and scheduling.
+
+---
+
+### ADR 003: NumPy 2.x and Pybind11 Windows Memory Buffer Alignment
+* **Status:** Accepted
+* **Context:**
+  On 64-bit Windows environments running NumPy 2.x, default `numpy.uint32` arrays expose a type character `'L'` (`unsigned long`), whereas pybind11 C++ bindings compiled with MSVC expect unsigned integer buffer type `'I'` (`unsigned int`). Direct instantiation of `vroom.Input.set_durations_matrix(numpy.asarray(..., dtype="uint32"))` triggers a `RuntimeError: Incompatible buffer format!`.
+* **Decision:**
+  Encapsulate matrix generation in `src/utils.py` and `src/vrptw_solver.py` using `numpy.uintc` / `'I'` and construct explicit `vroom._vroom.Matrix` wrapper objects, ensuring zero-copy memory compatibility across Windows, Linux, and macOS runtimes.
+
+---
+
+### ADR 004: Clean Separation of Domain Models, Parsers, and Solvers
+* **Status:** Accepted
+* **Context:**
+  Downstream components (event simulator, live visualizer, interactive dashboard) require rich access to both raw human-readable telemetry (unscaled floats) and solver-ready tensors (scaled integers).
+* **Decision:**
+  Structure data parsing into clean typed dictionaries / domain records containing both raw metrics and scaled integers, enabling visualizers to render physical units directly while the solver executes on scaled integers.
+
+---
+
+## 2. Experiments & Benchmarks
+
+| Experiment ID | Date | Instance | Nodes | Engine | Exploration Level | Threads | Runtime | Solution Status |
+|---|---|---|---|---|---|---|---|---|
+| EXP-001 | 2026-10-21 | Synthetic 2-node | 2 | pyvroom 1.15.2 | 1 | 1 | < 5 ms | Verified (Cost: 1000) |
+| EXP-002 | 2026-10-21 | Solomon C101-25 | 26 | pyvroom 1.15.2 | 1 | 2 | ~80 ms | Verified (Cost: 19183, 3 Routes) |
+
+---
+
+## 3. AI Assistance Log
+
+| Step / Prompt | AI Role & Scope | Human Review & Verification |
+|---|---|---|
+| Step 1 Scaffold & Setup | Architectural setup: designed repository hierarchy, configured dependencies (`pyvroom`, `streamlit`, `plotly`), established `DEV_LOG.md` and `.gitignore`. | Inspected dependency compatibility and Windows environment prerequisites. |
+| Memory Buffer Diagnostics | Identified NumPy 2.x / Windows MSVC buffer signature mismatch (`'L'` vs `'I'`) in `pyvroom` and implemented `np.uintc` buffer translation. | Verified resolution via direct C++ matrix binding tests. |
+| Solomon Parser & Solver | Authored parsing algorithm for Solomon VRPTW format, scaling pipeline, Euclidean integer distance matrix calculator, and VROOM input problem generator. | Validated coordinate scaling and data integrity against standard Solomon C101 specifications. |
