@@ -566,17 +566,7 @@ with st.sidebar:
 
 
 # ==============================================================================
-# 7. Live Display Placeholders (Dynamic Updates without Page Reload)
-# ==============================================================================
-kpi_placeholder = st.empty()
-render_kpi_metrics(kpi_placeholder, sim)
-
-map_placeholder = st.empty()
-map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
-
-
-# ==============================================================================
-# 8. Simulation Controls (Disruption Triggers & Autonomous Loop)
+# 7. Simulation Controls (Disruption Triggers & Autonomous Loop)
 # ==============================================================================
 st.markdown("### ⚡ Live Disruption & Simulation Controls")
 col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.6, 1.2, 1.2], gap="medium")
@@ -587,15 +577,10 @@ with col_ctrl1:
     c_play, c_pause, c_step = st.columns(3)
     with c_play:
         if st.button("▶️ Start / Resume", use_container_width=True, type="primary"):
-            if not sim.is_simulation_completed():
-                st.session_state.is_simulating = True
-                st.rerun()
-            else:
-                st.info("Simulation completed. Reset to run again.")
+            st.session_state.is_simulating = True
     with c_pause:
         if st.button("⏸️ Pause", use_container_width=True):
             st.session_state.is_simulating = False
-            st.rerun()
     with c_step:
         if st.button("⏭️ Step (+25)", use_container_width=True):
             st.session_state.is_simulating = False
@@ -603,7 +588,6 @@ with col_ctrl1:
                 next_t = min(st.session_state.current_time + 25.0, float(sim.instance.depot.due_date))
                 sim.advance_clock(next_t)
                 st.session_state.current_time = next_t
-            st.rerun()
 
 # --- Column 2: Vehicle Breakdown Disruption ---
 with col_ctrl2:
@@ -620,7 +604,6 @@ with col_ctrl2:
             sim.replan(exploration_level=1)
             rt = sim.replanning_history[-1]["runtime_ms"]
             st.toast(f"🚨 Van 1 breakdown handled! Re-routed in {rt:.2f} ms.", icon="⚠️")
-        st.rerun()
 
 # --- Column 3: Rush Order Injection ---
 with col_ctrl3:
@@ -666,7 +649,16 @@ with col_ctrl3:
         sim.replan(exploration_level=1)
         rt = sim.replanning_history[-1]["runtime_ms"]
         st.toast(f"⚡ Injected {len(injected)} rush stops! Fleet re-routed in {rt:.2f} ms.", icon="🚀")
-        st.rerun()
+
+
+# ==============================================================================
+# 8. Live Display Placeholders (Dynamic Updates without Page Reload)
+# ==============================================================================
+kpi_placeholder = st.empty()
+render_kpi_metrics(kpi_placeholder, sim)
+
+map_placeholder = st.empty()
+map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
 
 
 # ==============================================================================
@@ -769,33 +761,24 @@ with tab_fleet:
 
 
 # ==============================================================================
-# 10. Autonomous Execution Loop (Dynamic Placeholders Update)
+# 10. Autonomous Execution Loop (Native Streamlit Animation via st.rerun)
 # ==============================================================================
-if st.session_state.is_simulating:
-    while st.session_state.is_simulating:
-        # Check termination condition: all deliveries done and vans at depot
-        if sim.is_simulation_completed():
-            st.session_state.is_simulating = False
-            render_kpi_metrics(kpi_placeholder, sim)
-            map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
-            st.toast("🎉 All customer deliveries completed! Fleet returned to depot.", icon="🏁")
-            st.rerun()
+import time
 
-        # Advance virtual clock by 10.0 units
-        next_t = min(
-            st.session_state.current_time + 10.0,
-            float(sim.instance.depot.due_date),
-        )
-        sim.advance_clock(next_t)
-        st.session_state.current_time = next_t
+# Check if the simulation is active and not finished
+if st.session_state.get('is_simulating', False):
+    if not st.session_state.sim.is_simulation_completed():
+        # Advance the clock smoothly
+        st.session_state.current_time += 10.0
+        st.session_state.sim.advance_clock(st.session_state.current_time)
+        
+        # Pace the animation so the user can see the vans moving
+        time.sleep(0.15) 
+        
+        # Force Streamlit to rerun the script from top to bottom, updating the map and KPIs
+        st.rerun()
+    else:
+        # Auto-stop when deliveries are done
+        st.session_state.is_simulating = False
+        st.rerun()
 
-        # Dynamically update UI placeholders without full page reload
-        render_kpi_metrics(kpi_placeholder, sim)
-        map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
-
-        if sim.is_simulation_completed():
-            st.session_state.is_simulating = False
-            st.toast("🎉 All customer deliveries completed! Fleet returned to depot.", icon="🏁")
-            st.rerun()
-
-        time.sleep(0.2)
