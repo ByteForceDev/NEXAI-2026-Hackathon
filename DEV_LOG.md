@@ -55,12 +55,34 @@
 
 ---
 
+### ADR 005: State-Freezing & Temporal Route Slicing for Dynamic VRPTW Re-planning
+* **Status:** Accepted
+* **Context:**
+  When real-time operational disruptions occur during daily dispatch (e.g., vehicle mechanical breakdowns, traffic snarls, rush customer orders injected at $T_{\text{event}}$), the global routing plan cannot be recomputed from scratch ($T = 0$). Past physical actions are irreversible: packages already handed over to customers cannot be retrieved, and drivers currently en route cannot teleport back to the central depot.
+* **Decision:**
+  Implement a temporal slicing and state-freezing strategy within `SimulationState`:
+  1. **Temporal Horizon Partitioning:** For each route in the active solution, evaluate each step's physical completion boundary: $T_{\text{complete}} = \text{arrival} + \text{waiting\_time} + \text{service}$.
+     - **Completed Deliveries:** Any stop where $\text{arrival} + \text{service} \le T_{\text{event}}$ is permanently frozen as completed.
+     - **Pending Stops:** Stops scheduled at $> T_{\text{event}}$ are released back into the shared `pending_jobs` pool.
+  2. **Vehicle Mid-Route Kinematics:** Each active vehicle's state is dynamically translated:
+     - Its new departure location index is set to the spatial node of its *last completed delivery* (or the central depot if no stops were finished).
+     - Its remaining capacity is updated: $C_{\text{remaining}} = C_{\text{initial}} - \sum_{j \in \text{completed}} d_j$.
+     - Its operational start horizon is bounded by $\max(T_{\text{event}}, T_{\text{complete, last\_job}})$, ensuring causal feasibility without backwards time travel.
+     - Its destination step remains pinned to the central depot to guarantee safe vehicle return.
+  3. **Fleet Disruption Handling:**
+     - **Breakdown:** The disabled vehicle is barred from future dispatches (`is_broken = True`). Its unfinished stops in the pending pool are dynamically absorbed and re-routed across surviving vehicles or available depot reserves.
+     - **Order Injection:** Dynamically expands the integer Euclidean distance matrix to shape $(N+K, N+K)$ and registers fresh `vroom.Job` instances in the pending pool.
+  4. **Sub-second Re-optimization:** Re-invoking `pyvroom.Input.solve()` on the residual state completes in under 5 milliseconds, enabling real-time interactive dispatch without blocking user interactions.
+
+---
+
 ## 2. Experiments & Benchmarks
 
 | Experiment ID | Date | Instance | Nodes | Engine | Exploration Level | Threads | Runtime | Solution Status |
 |---|---|---|---|---|---|---|---|---|
 | EXP-001 | 2026-10-21 | Synthetic 2-node | 2 | pyvroom 1.15.2 | 1 | 1 | < 5 ms | Verified (Cost: 1000) |
 | EXP-002 | 2026-10-21 | Solomon C101-25 | 26 | pyvroom 1.15.2 | 1 | 2 | ~80 ms | Verified (Cost: 19183, 3 Routes) |
+| EXP-003 | 2026-10-21 | C101-25 Disruption (T=300, breakdown + new order) | 27 | pyvroom 1.15.2 | 1 | 2 | ~3.5 ms | Verified (Cost: 15430, 3 Active Routes) |
 
 ---
 
@@ -71,3 +93,5 @@
 | Step 1 Scaffold & Setup | Architectural setup: designed repository hierarchy, configured dependencies (`pyvroom`, `streamlit`, `plotly`), established `DEV_LOG.md` and `.gitignore`. | Inspected dependency compatibility and Windows environment prerequisites. |
 | Memory Buffer Diagnostics | Identified NumPy 2.x / Windows MSVC buffer signature mismatch (`'L'` vs `'I'`) in `pyvroom` and implemented `np.uintc` buffer translation. | Verified resolution via direct C++ matrix binding tests. |
 | Solomon Parser & Solver | Authored parsing algorithm for Solomon VRPTW format, scaling pipeline, Euclidean integer distance matrix calculator, and VROOM input problem generator. | Validated coordinate scaling and data integrity against standard Solomon C101 specifications. |
+| Step 2 Simulation Engine & Live Re-planning | Designed `SimulationState` manager, mid-route route slicing at $T_{\text{event}}$, vehicle kinematic translation, dynamic matrix expansion for new orders, vehicle breakdown reassignment, and sub-5ms re-planning. | Executed full automated integration verification suite testing simultaneous vehicle breakdown and order injection. |
+
