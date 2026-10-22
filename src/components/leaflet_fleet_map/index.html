@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leaflet OpenStreetMap Autonomous Fleet Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./leaflet.css" />
+  <script src="./leaflet.js"></script>
+  <style>
+    :root {
+      --font-sans: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --background: #ffffff;
+      --foreground: #09090b;
+      --card: #ffffff;
+      --card-foreground: #09090b;
+      --border: #e4e4e7;
+      --muted: #f4f4f5;
+      --muted-foreground: #71717a;
+      --primary: #2563eb;
+      --primary-foreground: #ffffff;
+      --radius: 8px;
+    }
+
+    [data-theme="dark"] {
+      --background: #09090b;
+      --foreground: #f4f4f5;
+      --card: #09090b;
+      --card-foreground: #f4f4f5;
+      --border: #27272a;
+      --muted: #18181b;
+      --muted-foreground: #a1a1aa;
+      --primary: #3b82f6;
+      --primary-foreground: #ffffff;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      font-family: var(--font-sans);
+    }
+
+    #map-wrapper {
+      position: relative;
+      width: 100%;
+      height: 560px;
+      min-height: 560px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+      min-height: 560px;
+      background: #f8fafc;
+    }
+
+    /* ShadCN Dark Theme OpenStreetMap Tile Filter */
+    [data-theme="dark"] .leaflet-tile {
+      filter: brightness(0.62) invert(1) contrast(3.0) hue-rotate(200deg) saturate(0.25);
+    }
+
+    /* ShadCN Popover & Tooltip Styling */
+    .leaflet-popup-content-wrapper {
+      background: #ffffff !important;
+      color: #09090b !important;
+      border: 1px solid #e2e8f0 !important;
+      border-radius: 6px !important;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.04) !important;
+      font-family: var(--font-sans) !important;
+      padding: 0 !important;
+      overflow: hidden !important;
+    }
+
+    [data-theme="dark"] .leaflet-popup-content-wrapper {
+      background: #18181b !important;
+      color: #f4f4f5 !important;
+      border-color: #27272a !important;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4) !important;
+    }
+
+    .leaflet-popup-content {
+      margin: 10px 14px !important;
+      line-height: 1.45 !important;
+      font-size: 11px !important;
+    }
+
+    .leaflet-popup-tip {
+      background: #ffffff !important;
+      border: 1px solid #e2e8f0 !important;
+    }
+
+    [data-theme="dark"] .leaflet-popup-tip {
+      background: #18181b !important;
+      border-color: #27272a !important;
+    }
+
+    /* Floating Legend Badge Container */
+    .map-legend-panel {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(6px);
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 7px 11px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+      font-size: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-width: 280px;
+      pointer-events: auto;
+    }
+
+    [data-theme="dark"] .map-legend-panel {
+      background: rgba(18, 18, 20, 0.92);
+      border-color: #27272a;
+      color: #f4f4f5;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* Custom Leaflet Marker HTML Icons */
+    .depot-marker {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #09090b;
+      color: #ffffff;
+      border: 2px solid #ffffff;
+      border-radius: 4px;
+      width: 32px;
+      height: 32px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+    }
+
+    .depot-badge {
+      position: absolute;
+      bottom: -15px;
+      background: #09090b;
+      color: #ffffff;
+      font-size: 8px;
+      font-weight: 700;
+      padding: 1px 4px;
+      border-radius: 3px;
+      white-space: nowrap;
+      border: 1px solid #ffffff;
+    }
+
+    /* Neon Green for Visited / Completed Nodes */
+    .order-marker-completed {
+      background: #39ff14;
+      color: #032b05;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 10px #39ff14, 0 0 20px rgba(57, 255, 20, 0.7);
+      cursor: pointer;
+      animation: neon-glow-green 2s ease-in-out infinite alternate;
+    }
+
+    @keyframes neon-glow-green {
+      from {
+        box-shadow: 0 0 6px #39ff14, 0 0 12px rgba(57, 255, 20, 0.6);
+      }
+      to {
+        box-shadow: 0 0 12px #39ff14, 0 0 24px rgba(57, 255, 20, 0.95);
+      }
+    }
+
+    /* Neon Blue for Unvisited / Pending Nodes */
+    .order-marker-pending {
+      background: #00f0ff;
+      color: #021526;
+      border: 2px solid #ffffff;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 10px #00f0ff, 0 0 20px rgba(0, 240, 255, 0.7);
+      cursor: pointer;
+      animation: neon-glow-blue 2s ease-in-out infinite alternate;
+    }
+
+    @keyframes neon-glow-blue {
+      from {
+        box-shadow: 0 0 6px #00f0ff, 0 0 12px rgba(0, 240, 255, 0.6);
+      }
+      to {
+        box-shadow: 0 0 12px #00f0ff, 0 0 24px rgba(0, 240, 255, 0.95);
+      }
+    }
+
+    .order-marker-rush {
+      background: #f59e0b;
+      color: #ffffff;
+      border: 2px solid #09090b;
+      border-radius: 3px;
+      transform: rotate(45deg);
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 4px rgba(245, 158, 11, 0.4);
+      cursor: pointer;
+    }
+
+    .order-marker-rush span {
+      transform: rotate(-45deg);
+      font-size: 8px;
+      font-weight: 700;
+    }
+
+    /* Map Action Buttons (Fullscreen Toggle) */
+    .map-action-btn {
+      position: absolute;
+      top: 80px;
+      left: 12px;
+      z-index: 1000;
+      background: #ffffff;
+      color: #09090b;
+      border: 1px solid #e4e4e7;
+      border-radius: 6px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      outline: none;
+    }
+
+    .map-action-btn:hover {
+      background: #f4f4f5;
+      border-color: #d4d4d8;
+    }
+
+    [data-theme="dark"] .map-action-btn {
+      background: #18181b;
+      color: #f4f4f5;
+      border-color: #27272a;
+    }
+
+    /* Vehicle Marker */
+    .vehicle-marker-container {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 38px;
+      height: 38px;
+      cursor: pointer;
+      will-change: transform;
+    }
+
+    .vehicle-marker-body {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 2px solid #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25);
+      transition: background-color 0.2s ease;
+    }
+
+    .vehicle-marker-label {
+      position: absolute;
+      top: -14px;
+      background: #09090b;
+      color: #ffffff;
+      font-size: 8px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    }
+
+    .vehicle-marker-broken .vehicle-marker-body {
+      background: #ef4444 !important;
+      border-color: #fee2e2;
+      animation: pulse-broken 1.5s infinite;
+    }
+
+    @keyframes pulse-broken {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.12); }
+      100% { transform: scale(1); }
+    }
+  </style>
+</head>
+<body>
+  <div id="map-wrapper">
+    <div id="map"></div>
+
+    <!-- Fullscreen Toggle Button -->
+    <button id="btn-fullscreen" class="map-action-btn" title="Toggle Fullscreen" onclick="toggleMapFullscreen()">
+      <svg id="fs-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+      </svg>
+      <svg id="fs-collapse-icon" style="display:none;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+      </svg>
+    </button>
+
+    <!-- Floating Top-Right Legend -->
+    <div id="legend-panel" class="map-legend-panel">
+      <div style="font-weight: 700; color: var(--foreground); margin-bottom: 2px;">
+        OpenStreetMap Autonomous Fleet
+      </div>
+      <div class="legend-row">
+        <div class="legend-indicator" style="background: #09090b; border: 1px solid #ffffff;"></div>
+        <span>Central Hub (Depot)</span>
+      </div>
+      <div id="legend-vehicles" style="display: flex; flex-direction: column; gap: 4px;"></div>
+      <div class="legend-row">
+        <div class="legend-indicator" style="background: #00f0ff; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #00f0ff;"></div>
+        <span style="font-weight: 600;">Unvisited Orders (Neon Blue)</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-indicator" style="background: #39ff14; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #39ff14;"></div>
+        <span style="font-weight: 600;">Visited Orders (Neon Green)</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-indicator" style="background: #f59e0b; border: 1px solid #09090b; transform: rotate(45deg);"></div>
+        <span>Rush Demand (Mid-day)</span>
+      </div>
+      <div id="legend-geo-info" style="font-size: 8.5px; color: #71717a; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 2px;">
+        100% Continental Land Grid (Dallas Logistics Hub)
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // =========================================================================
+    // Streamlit Custom Component Messaging Protocol
+    // =========================================================================
+    function sendToStreamlit(type, data = {}) {
+      window.parent.postMessage({
+        isStreamlitMessage: true,
+        type: type,
+        ...data
+      }, "*");
+    }
+
+    function setFrameHeight(height) {
+      sendToStreamlit("streamlit:setFrameHeight", { height: height });
+    }
+
+    const ROUTE_COLORS = [
+      "#09090b",  // Lead Van 1 (Crisp Charcoal / Black)
+      "#2563eb",  // Van 2 (Cobalt Blue)
+      "#059669",  // Van 3 (Emerald Green)
+      "#7c3aed",  // Van 4 (Violet)
+      "#d97706",  // Van 5 (Amber)
+      "#475569",  // Van 6 (Slate)
+      "#db2777",  // Van 7 (Rose)
+      "#0891b2",  // Van 8 (Cyan)
+    ];
+
+    // =========================================================================
+    // Component State & Map References
+    // =========================================================================
+    let map = null;
+    let tileLayer = null;
+    let isMapInitialized = false;
+    let componentHeight = 560;
+    let lastRouteVersion = null;
+    let lastOrdersHash = null;
+    let lastCenterKey = null;
+
+    // Layer Groups
+    let depotLayer = null;
+    let routesLayerGroup = null;
+    let ordersLayerGroup = null;
+
+    // Kinematics Animation State for Each Vehicle
+    // Map: vId -> { marker, currentLat, currentLon, targetLat, targetLon, speed, isBroken, heading, status, info }
+    const vehicleKinematics = new Map();
+    const vehicleRoadPaths = new Map();
+    let animFrameId = null;
+    let lastTickTime = performance.now();
+
+    // =========================================================================
+    // Map Initialization (Runs Exactly ONCE)
+    // =========================================================================
+    function initMapOnce(initialCenter, initialZoom) {
+      if (isMapInitialized) return;
+
+      const center = initialCenter || [12.9202, 79.1306];
+      const zoom = initialZoom || 13;
+
+      map = L.map('map', {
+        center: center,
+        zoom: zoom,
+        zoomControl: true,
+        attributionControl: true,
+        fadeAnimation: true,
+        zoomAnimation: true
+      });
+
+      // Standard OpenStreetMap Tile Layer
+      tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'
+      }).addTo(map);
+
+      // Layer groups for clean, non-destructive updates
+      routesLayerGroup = L.layerGroup().addTo(map);
+      depotLayer = L.layerGroup().addTo(map);
+      ordersLayerGroup = L.layerGroup().addTo(map);
+
+      // Responsive Map Resizing
+      const resizeObserver = new ResizeObserver(() => {
+        if (map) map.invalidateSize();
+      });
+      resizeObserver.observe(document.getElementById('map'));
+
+      window.addEventListener('resize', () => {
+        if (map) map.invalidateSize();
+      });
+
+      isMapInitialized = true;
+    }
+
+    // =========================================================================
+    // Icon Builders
+    // =========================================================================
+    function createDepotIcon() {
+      const html = `
+        <div class="depot-marker">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+            <polyline points="9 22 9 12 15 12 15 22"></polyline>
+          </svg>
+          <div class="depot-badge">DEPOT</div>
+        </div>
+      `;
+      return L.divIcon({
+        className: 'custom-depot-icon',
+        html: html,
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+        popupAnchor: [0, -18]
+      });
+    }
+
+    function createOrderIcon(type, id) {
+      if (type === 'completed') {
+        return L.divIcon({
+          className: 'custom-order-icon',
+          html: `<div class="order-marker-completed">#${id}</div>`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+          popupAnchor: [0, -12]
+        });
+      } else if (type === 'rush') {
+        return L.divIcon({
+          className: 'custom-order-icon',
+          html: `<div class="order-marker-rush"><span>R${id}</span></div>`,
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+          popupAnchor: [0, -12]
+        });
+      } else {
+        return L.divIcon({
+          className: 'custom-order-icon',
+          html: `<div class="order-marker-pending">#${id}</div>`,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+          popupAnchor: [0, -12]
+        });
+      }
+    }
+
+    function createVehicleIcon(vId, color, isBroken, heading) {
+      const label = isBroken ? `Van ${vId} [OFF]` : `Van ${vId}`;
+      const rot = heading || 0;
+      const html = `
+        <div class="vehicle-marker-container ${isBroken ? 'vehicle-marker-broken' : ''}">
+          <div class="vehicle-marker-label">${label}</div>
+          <div class="vehicle-marker-body" style="background: ${isBroken ? '#ef4444' : color};">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(${rot}deg); transition: transform 0.15s linear;">
+              <path d="M8 6v6"></path>
+              <path d="M16 6v6"></path>
+              <rect width="18" height="16" x="3" y="3" rx="2"></rect>
+              <path d="M3 12h18"></path>
+              <path d="M19 19v2a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-2"></path>
+              <path d="M7 19v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2"></path>
+            </svg>
+          </div>
+        </div>
+      `;
+      return L.divIcon({
+        className: 'custom-vehicle-icon',
+        html: html,
+        iconSize: [38, 38],
+        iconAnchor: [19, 19],
+        popupAnchor: [0, -20]
+      });
+    }
+
+    // =========================================================================
+    // Fullscreen Toggle Control
+    // =========================================================================
+    function toggleMapFullscreen() {
+      const wrapper = document.getElementById('map-wrapper');
+      const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+
+      if (!isFs) {
+        if (wrapper.requestFullscreen) {
+          wrapper.requestFullscreen();
+        } else if (wrapper.webkitRequestFullscreen) {
+          wrapper.webkitRequestFullscreen();
+        } else if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      const expandIcon = document.getElementById('fs-expand-icon');
+      const collapseIcon = document.getElementById('fs-collapse-icon');
+      if (expandIcon) expandIcon.style.display = isFs ? 'none' : 'block';
+      if (collapseIcon) collapseIcon.style.display = isFs ? 'block' : 'none';
+      setTimeout(() => {
+        if (map) map.invalidateSize();
+      }, 150);
+    });
+
+    // =========================================================================
+    // 60 FPS Browser Kinematics Loop (Smooth Road Tracking)
+    // =========================================================================
+    function startKinematicsLoop() {
+      if (animFrameId !== null) return;
+
+      function tick(now) {
+        const dt = Math.min((now - lastTickTime) / 1000.0, 0.1);
+        lastTickTime = now;
+
+        vehicleKinematics.forEach((kine, vId) => {
+          if (!kine.marker) return;
+
+          if (kine.isBroken) {
+            // Broken van freezes at last known coordinates
+            return;
+          }
+
+          const dLat = kine.targetLat - kine.currentLat;
+          const dLon = kine.targetLon - kine.currentLon;
+          const distToTarget = Math.hypot(dLat, dLon);
+
+          if (distToTarget > 0.015) {
+            // Large distance jump / route reset: snap directly
+            kine.currentLat = kine.targetLat;
+            kine.currentLon = kine.targetLon;
+            kine.heading = (kine.targetHeading !== undefined && kine.targetHeading !== 0) ? kine.targetHeading : kine.heading;
+          } else if (distToTarget > 0.00001) {
+            const stepFactor = Math.min(1.0, dt * 10.0);
+            kine.currentLat += dLat * stepFactor;
+            kine.currentLon += dLon * stepFactor;
+
+            const angleDeg = (kine.targetHeading !== undefined && kine.targetHeading !== 0)
+              ? kine.targetHeading
+              : (Math.atan2(dLon, dLat) * 180 / Math.PI);
+            kine.heading = angleDeg;
+          } else {
+            kine.currentLat = kine.targetLat;
+            kine.currentLon = kine.targetLon;
+            if (kine.targetHeading !== undefined && kine.targetHeading !== 0) {
+              kine.heading = kine.targetHeading;
+            }
+          }
+
+          kine.marker.setLatLng([kine.currentLat, kine.currentLon]);
+          const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
+          kine.marker.setIcon(createVehicleIcon(vId, color, false, kine.heading));
+        });
+
+        animFrameId = requestAnimationFrame(tick);
+      }
+
+      animFrameId = requestAnimationFrame(tick);
+    }
+
+    // =========================================================================
+    // Streamlit Message Listener
+    // =========================================================================
+    window.addEventListener('message', (event) => {
+      const msg = event.data;
+      if (!msg || msg.type !== 'streamlit:render') return;
+
+      const args = msg.args;
+      if (!args) return;
+
+      // 1. Initialize Map ONCE
+      initMapOnce(args.center, args.zoom || 13);
+
+      // Handle map center repositioning if anchor moves
+      const newCenterKey = args.center ? `${args.center[0].toFixed(3)}_${args.center[1].toFixed(3)}` : null;
+      if (newCenterKey && lastCenterKey !== newCenterKey) {
+        lastCenterKey = newCenterKey;
+        if (map) {
+          map.setView(args.center, args.zoom || 13);
+          depotLayer.clearLayers();
+          routesLayerGroup.clearLayers();
+          ordersLayerGroup.clearLayers();
+          vehicleKinematics.forEach((kine) => {
+            if (kine.marker) map.removeLayer(kine.marker);
+          });
+          vehicleKinematics.clear();
+          lastRouteVersion = null;
+          lastOrdersHash = null;
+        }
+      }
+
+      // 2. Theme synchronization
+      const themeMode = args.theme || (msg.theme && msg.theme.base === 'dark' ? 'dark' : 'light');
+      document.body.setAttribute('data-theme', themeMode);
+
+      // 3. Height synchronization - enforce explicit height on container and notify Streamlit
+      const targetHeight = (args.height && args.height > 0) ? args.height : componentHeight;
+      componentHeight = targetHeight;
+      const wrapElem = document.getElementById('map-wrapper');
+      const mapElem = document.getElementById('map');
+      if (wrapElem) {
+        wrapElem.style.height = `${componentHeight}px`;
+        wrapElem.style.minHeight = `${componentHeight}px`;
+      }
+      if (mapElem) {
+        mapElem.style.height = `${componentHeight}px`;
+        mapElem.style.minHeight = `${componentHeight}px`;
+      }
+      setFrameHeight(componentHeight);
+      if (map) {
+        map.invalidateSize();
+      }
+
+      // 4. Update Geo metadata description
+      if (args.geo_metadata && args.geo_metadata.zone_name) {
+        const geoInfoDom = document.getElementById('legend-geo-info');
+        if (geoInfoDom) {
+          geoInfoDom.textContent = `${args.geo_metadata.zone_name}`;
+        }
+      }
+
+      const depot = args.depot || { lat: 32.7830, lon: -96.8000 };
+
+      // 5. Update Depot (Stationary on 100% solid land)
+      if (depotLayer.getLayers().length === 0) {
+        const depotMarker = L.marker([depot.lat, depot.lon], {
+          icon: createDepotIcon(),
+          zIndexOffset: 1000
+        });
+        const depotPopup = `
+          <div style="font-weight: 700; font-size: 12px; margin-bottom: 3px; color: #09090b;">
+            CENTRAL DISPATCH HUB (Node 0)
+          </div>
+          <div><b>Address:</b> ${depot.address || 'Commerce & Market St, Dallas, TX'}</div>
+          <div><b>Coordinates:</b> (${depot.lat.toFixed(4)}, ${depot.lon.toFixed(4)})</div>
+          <div><b>Terrain:</b> 100% Continental Land (Inland Road Grid)</div>
+          <div><b>Operational Horizon:</b> [${depot.ready_time || 0}s, ${depot.due_date || 0}s]</div>
+          <div><b>Fleet Base:</b> ${depot.vehicle_count || 3} Commercial Delivery Vans</div>
+        `;
+        depotMarker.bindPopup(depotPopup);
+        depotLayer.addLayer(depotMarker);
+      }
+
+      // 5. Always keep vehicleRoadPaths updated with the latest road route coordinates
+      if (args.routes && args.routes.length > 0) {
+        vehicleRoadPaths.clear();
+        args.routes.forEach((route) => {
+          if (route.road_coordinates && route.road_coordinates.length >= 2) {
+            vehicleRoadPaths.set(route.vehicle_id, route.road_coordinates);
+          }
+        });
+      }
+
+      // Update Static Road Routes when Route Version Changes
+      const routeVer = args.route_version || 'v1';
+      if (routeVer !== lastRouteVersion) {
+        lastRouteVersion = routeVer;
+        routesLayerGroup.clearLayers();
+
+        const routes = args.routes || [];
+        const legendVehiclesDom = document.getElementById('legend-vehicles');
+        if (legendVehiclesDom) legendVehiclesDom.innerHTML = '';
+
+        routes.forEach((route) => {
+          const vId = route.vehicle_id;
+          const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
+          const coords = route.road_coordinates || [];
+
+          if (coords.length >= 2) {
+            const polyline = L.polyline(coords, {
+              color: color,
+              weight: 3.5,
+              opacity: 0.85,
+              lineJoin: 'round',
+              lineCap: 'round',
+              dashArray: route.is_broken ? '4, 8' : null
+            });
+
+            polyline.bindPopup(`
+              <div style="font-weight: 700; font-size: 11px; color: ${color};">
+                Road Route Van #${vId}
+              </div>
+              <div><b>Assigned Packages:</b> ${route.assigned_packages || coords.length}</div>
+              <div><b>Road Provider:</b> ${route.provider || 'OSRM Road Network'}</div>
+            `);
+
+            routesLayerGroup.addLayer(polyline);
+
+            // Add legend entry
+            if (legendVehiclesDom) {
+              const row = document.createElement('div');
+              row.className = 'legend-row';
+              row.innerHTML = `
+                <div class="legend-indicator" style="background: ${color};"></div>
+                <span>Route Van ${vId}</span>
+              `;
+              legendVehiclesDom.appendChild(row);
+            }
+          }
+        });
+      }
+
+      // 6. Update Orders when Orders Hash Changes
+      const ordersHash = `${(args.completed_orders || []).length}_${(args.pending_orders || []).length}_${(args.rush_orders || []).length}`;
+      if (ordersHash !== lastOrdersHash) {
+        lastOrdersHash = ordersHash;
+        ordersLayerGroup.clearLayers();
+
+        // Completed Orders
+        (args.completed_orders || []).forEach((ord) => {
+          const m = L.marker([ord.lat, ord.lon], {
+            icon: createOrderIcon('completed', ord.id),
+            zIndexOffset: 300
+          });
+          m.bindPopup(`
+            <div style="font-weight: 700; color: #059669;">Customer #${ord.id} [Delivered]</div>
+            <div><b>Location:</b> (${ord.lat.toFixed(4)}, ${ord.lon.toFixed(4)})</div>
+            <div><b>Delivered by:</b> Van #${ord.vehicle_id}</div>
+            <div><b>Demand:</b> ${ord.demand || '-'} units</div>
+            <div><b>Finished at:</b> T=${ord.completion_time ? ord.completion_time.toFixed(1) : 0}s</div>
+          `);
+          ordersLayerGroup.addLayer(m);
+        });
+
+        // Pending Orders
+        (args.pending_orders || []).forEach((ord) => {
+          const m = L.marker([ord.lat, ord.lon], {
+            icon: createOrderIcon('pending', ord.id),
+            zIndexOffset: 400
+          });
+          m.bindPopup(`
+            <div style="font-weight: 700; color: #2563eb;">Customer #${ord.id} [Pending]</div>
+            <div><b>Location:</b> (${ord.lat.toFixed(4)}, ${ord.lon.toFixed(4)})</div>
+            <div><b>Demand:</b> ${ord.demand || '-'} units</div>
+            <div><b>Time Window:</b> [${ord.ready_time || 0}s, ${ord.due_date || 0}s]</div>
+          `);
+          ordersLayerGroup.addLayer(m);
+        });
+
+        // Rush Orders
+        (args.rush_orders || []).forEach((ord) => {
+          const m = L.marker([ord.lat, ord.lon], {
+            icon: createOrderIcon('rush', ord.id),
+            zIndexOffset: 500
+          });
+          m.bindPopup(`
+            <div style="font-weight: 700; color: #d97706;">[Rush Order] #${ord.id}</div>
+            <div><b>Location:</b> (${ord.lat.toFixed(4)}, ${ord.lon.toFixed(4)})</div>
+            <div><b>Demand:</b> ${ord.demand || '-'} units</div>
+            <div><b>Time Window:</b> [${ord.ready_time || 0}s, ${ord.due_date || 0}s]</div>
+          `);
+          ordersLayerGroup.addLayer(m);
+        });
+      }
+
+      // 7. Ingest Dynamic Vehicle Kinematics State
+      const currentVIds = new Set((args.vehicles || []).map(v => v.vehicle_id));
+      vehicleKinematics.forEach((kine, vId) => {
+        if (!currentVIds.has(vId)) {
+          if (kine.marker && map) map.removeLayer(kine.marker);
+          vehicleKinematics.delete(vId);
+        }
+      });
+
+      (args.vehicles || []).forEach((veh) => {
+        const vId = veh.vehicle_id;
+        const targetLat = Number(veh.lat);
+        const targetLon = Number(veh.lon);
+        const isBroken = Boolean(veh.is_broken);
+        const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
+
+        const popupContent = `
+          <div style="font-weight: 700; font-size: 12px; color: ${isBroken ? '#ef4444' : color};">
+            Van #${vId} [${isBroken ? 'Disabled / Offline' : 'Active On Road'}]
+          </div>
+          <div><b>Coordinates:</b> (${targetLat.toFixed(4)}, ${targetLon.toFixed(4)})</div>
+          <div><b>Status:</b> ${veh.status || (isBroken ? 'OFFLINE' : 'Active')}</div>
+          <div><b>Waypoint:</b> Stop #${veh.waypoint_index || 0}</div>
+          <div><b>Speed:</b> ${(veh.speed || 1.0).toFixed(1)} units/s</div>
+          <div><b>Route Progress:</b> ${(veh.route_progress || 0.0).toFixed(1)}%</div>
+          <div><b>Remaining Capacity:</b> ${veh.remaining_capacity || 0} units</div>
+        `;
+
+        if (!vehicleKinematics.has(vId)) {
+          // Create new vehicle marker
+          const m = L.marker([targetLat, targetLon], {
+            icon: createVehicleIcon(vId, color, isBroken, 0),
+            zIndexOffset: 2000
+          }).addTo(map);
+          m.bindPopup(popupContent);
+
+          vehicleKinematics.set(vId, {
+            marker: m,
+            currentLat: targetLat,
+            currentLon: targetLon,
+            targetLat: targetLat,
+            targetLon: targetLon,
+            speed: veh.speed || 1.0,
+            isBroken: isBroken,
+            heading: veh.heading || 0,
+            targetHeading: veh.heading || 0,
+            status: veh.status
+          });
+        } else {
+          // Update targets for local 60fps interpolation
+          const kine = vehicleKinematics.get(vId);
+          kine.targetLat = targetLat;
+          kine.targetLon = targetLon;
+          kine.targetHeading = veh.heading !== undefined ? Number(veh.heading) : kine.heading;
+          kine.speed = veh.speed || 1.0;
+          kine.isBroken = isBroken;
+          kine.status = veh.status;
+
+          kine.marker.setPopupContent(popupContent);
+
+          if (isBroken) {
+            // Immediate lock and update to red broken icon
+            kine.currentLat = targetLat;
+            kine.currentLon = targetLon;
+            kine.marker.setLatLng([targetLat, targetLon]);
+            kine.marker.setIcon(createVehicleIcon(vId, '#ef4444', true, 0));
+          }
+        }
+      });
+
+      // 8. Start / maintain continuous 60 FPS interpolation loop
+      startKinematicsLoop();
+      setFrameHeight(componentHeight);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 60);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 250);
+    });
+
+    // Initialize Map and notify Streamlit as soon as DOM is ready
+    window.addEventListener('DOMContentLoaded', () => {
+      initMapOnce();
+      sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+      setFrameHeight(componentHeight);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 80);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 350);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 800);
+    });
+  </script>
+</body>
+</html>
