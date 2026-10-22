@@ -1860,7 +1860,7 @@ def render_live_simulation_board():
     # --- D. Real-World Leaflet + OpenStreetMap Fleet Road Tracker ---
     leaflet_data = build_leaflet_payload(sim_state)
     map_height = 880 if st.session_state.get("map_expanded", False) else 560
-    leaflet_fleet_map(
+    map_action = leaflet_fleet_map(
         depot=leaflet_data["depot"],
         routes=leaflet_data["routes"],
         vehicles=leaflet_data["vehicles"],
@@ -1874,8 +1874,84 @@ def render_live_simulation_board():
         height=map_height,
         theme="light",
         geo_metadata=leaflet_data["geo_metadata"],
+        is_simulating=bool(st.session_state.get("is_simulating", False)),
+        is_completed=bool(sim_state.is_simulation_completed()),
+        is_expanded=bool(st.session_state.get("map_expanded", False)),
+        broken_vehicles=list(sim_state.broken_vehicles),
         key="leaflet_fleet_map_instance",
     )
+
+    # Dispatch interactive actions triggered from Fullscreen overlays
+    if map_action and isinstance(map_action, dict):
+        act = map_action.get("action")
+        act_ts = map_action.get("timestamp")
+        last_ts = st.session_state.get("_last_map_action_ts")
+        if act and act_ts and act_ts != last_ts:
+            st.session_state["_last_map_action_ts"] = act_ts
+            if act == "resume":
+                st.session_state.is_simulating = True
+                st.rerun()
+            elif act == "pause":
+                st.session_state.is_simulating = False
+                st.rerun()
+            elif act == "breakdown":
+                v_target = map_action.get("vehicle_id")
+                if v_target is None:
+                    active_broken = sim_state.broken_vehicles
+                    candidate_vans = [vid for vid in sim_state.vehicles if vid not in active_broken]
+                    v_target = min(candidate_vans) if candidate_vans else None
+                if v_target is not None:
+                    v_target = int(v_target)
+                    res = sim_state.trigger_breakdown(v_target)
+                    if res.get("status") == "already_completed":
+                        st.toast(res.get("message"))
+                    else:
+                        sim_state.replan(exploration_level=1, reason=f"Mechanical Breakdown: Van {v_target} Disabled")
+                        rt = sim_state.replanning_history[-1]["runtime_ms"]
+                        st.toast(f"Van {v_target} breakdown logged. Fleet re-routed in {rt:.2f} ms.")
+                st.rerun()
+            elif act == "add_rush_orders":
+                st.session_state.rush_order_count += 1
+                offset = st.session_state.rush_order_count * 10
+                cur_t = float(st.session_state.current_time)
+                serv = 3.0
+                rush_orders = [
+                    {
+                        "cust_no": 100 + offset + 1,
+                        "x": 38.0 + ((offset * 7) % 35) - 15,
+                        "y": 55.0 + ((offset * 11) % 30) - 15,
+                        "demand": 15,
+                        "ready_time": cur_t,
+                        "due_date": cur_t + serv + 450.0,
+                        "service_time": serv,
+                    },
+                    {
+                        "cust_no": 100 + offset + 2,
+                        "x": 28.0 + ((offset * 5) % 40) - 15,
+                        "y": 70.0 - ((offset * 9) % 35) + 10,
+                        "demand": 20,
+                        "ready_time": cur_t,
+                        "due_date": cur_t + serv + 500.0,
+                        "service_time": serv,
+                    },
+                    {
+                        "cust_no": 100 + offset + 3,
+                        "x": 48.0 - ((offset * 13) % 30) + 15,
+                        "y": 45.0 + ((offset * 7) % 25) - 10,
+                        "demand": 10,
+                        "ready_time": cur_t,
+                        "due_date": cur_t + serv + 550.0,
+                        "service_time": serv,
+                    },
+                ]
+                try:
+                    injected = sim_state.inject_new_orders(rush_orders)
+                    sim_state.replan(exploration_level=1, reason=f"Demand Surge: +{len(injected)} Rush Orders Scheduled")
+                    rt = sim_state.replanning_history[-1]["runtime_ms"]
+                    st.toast(f"Injected {len(injected)} rush orders. Fleet re-routed in {rt:.2f} ms.")
+                except Exception as e:
+                    st.error(f"Failed to schedule rush orders: {e}")
+                st.rerun()
 
 # Invoke the live simulation fragment
 render_live_simulation_board()

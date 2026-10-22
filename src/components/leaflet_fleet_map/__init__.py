@@ -31,7 +31,13 @@ def leaflet_fleet_map(
     height: int = 560,
     theme: str = "light",
     geo_metadata: Optional[Dict[str, Any]] = None,
+    is_simulating: bool = False,
+    is_completed: bool = False,
+    is_expanded: bool = False,
+    broken_vehicles: Optional[List[int]] = None,
+    default: Any = None,
     key: Optional[str] = "leaflet_fleet_map",
+    **kwargs: Any,
 ) -> Any:
     """
     Render Leaflet OpenStreetMap fleet map with client-side 60 FPS kinematics interpolation.
@@ -50,7 +56,13 @@ def leaflet_fleet_map(
         height: Map container height in pixels.
         theme: "light" or "dark" theme mode.
         geo_metadata: Metadata regarding the geographic testbed projection.
+        is_simulating: Current simulation running state.
+        is_completed: Whether all deliveries are completed.
+        is_expanded: Whether expanded fullscreen view is active.
+        broken_vehicles: List of broken down vehicle IDs.
+        default: Default return value.
         key: Unique Streamlit component key.
+        **kwargs: Additional optional parameters.
     """
     return _leaflet_component(
         depot=depot,
@@ -66,6 +78,11 @@ def leaflet_fleet_map(
         height=height,
         theme=theme,
         geo_metadata=geo_metadata or {},
+        is_simulating=is_simulating,
+        is_completed=is_completed,
+        is_expanded=is_expanded,
+        broken_vehicles=broken_vehicles or [],
+        default=default,
         key=key,
-        default=None,
+        **kwargs,
     )

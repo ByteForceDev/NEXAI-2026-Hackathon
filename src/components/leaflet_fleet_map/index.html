@@ -331,6 +331,464 @@
       50% { transform: scale(1.12); }
       100% { transform: scale(1); }
     }
+
+    /* =========================================================================
+       Fullscreen Overlays: Bottom Control Bar & Right-Side Van Telemetry Table
+       ========================================================================= */
+    .fullscreen-bottom-bar,
+    .fullscreen-van-panel {
+      display: none;
+      user-select: none;
+    }
+
+    #map-wrapper:fullscreen .fullscreen-bottom-bar,
+    #map-wrapper.is-fullscreen .fullscreen-bottom-bar {
+      display: flex;
+    }
+
+    #map-wrapper:fullscreen .fullscreen-van-panel,
+    #map-wrapper.is-fullscreen .fullscreen-van-panel {
+      display: flex;
+    }
+
+    #map-wrapper.is-fullscreen {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      max-height: 100vh !important;
+      z-index: 999999 !important;
+      border-radius: 0 !important;
+      border: none !important;
+    }
+
+    #map-wrapper.is-fullscreen #map,
+    #map-wrapper:fullscreen #map {
+      width: 100vw !important;
+      height: 100vh !important;
+      min-height: 100vh !important;
+    }
+
+    /* Reposition Legend in Fullscreen to prevent overlapping right table */
+    #map-wrapper:fullscreen .map-legend-panel,
+    #map-wrapper.is-fullscreen .map-legend-panel {
+      top: 12px;
+      left: 54px;
+      right: auto;
+    }
+
+    /* Fullscreen Bottom Control Bar */
+    .fullscreen-bottom-bar {
+      position: absolute;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid #e4e4e7;
+      border-radius: 12px;
+      padding: 7px 14px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      align-items: center;
+      gap: 12px;
+      max-width: 92vw;
+      animation: fsSlideUp 0.22s ease-out;
+    }
+
+    [data-theme="dark"] .fullscreen-bottom-bar {
+      background: rgba(24, 24, 27, 0.95);
+      border-color: #27272a;
+      color: #f4f4f5;
+    }
+
+    @keyframes fsSlideUp {
+      from { transform: translate(-50%, 25px); opacity: 0; }
+      to { transform: translate(-50%, 0); opacity: 1; }
+    }
+
+    .fs-bar-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .fs-bar-divider {
+      width: 1px;
+      height: 22px;
+      background: #e4e4e7;
+    }
+
+    [data-theme="dark"] .fs-bar-divider {
+      background: #27272a;
+    }
+
+    .fs-state-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .fs-badge-green {
+      background: #ecfdf5;
+      color: #059669;
+      border: 1px solid #a7f3d0;
+    }
+
+    .fs-badge-amber {
+      background: #fffbeb;
+      color: #d97706;
+      border: 1px solid #fde68a;
+    }
+
+    .fs-badge-blue {
+      background: #eff6ff;
+      color: #2563eb;
+      border: 1px solid #bfdbfe;
+    }
+
+    .fs-clock-tag {
+      font-size: 12px;
+      font-weight: 700;
+      color: #09090b;
+      font-variant-numeric: tabular-nums;
+    }
+
+    [data-theme="dark"] .fs-clock-tag {
+      color: #f4f4f5;
+    }
+
+    .fs-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 12px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      outline: none;
+      white-space: nowrap;
+    }
+
+    .fs-btn:active {
+      transform: scale(0.97);
+    }
+
+    .fs-btn-resume {
+      background: #10b981;
+      color: #ffffff;
+    }
+    .fs-btn-resume:hover {
+      background: #059669;
+    }
+
+    .fs-btn-pause {
+      background: #f59e0b;
+      color: #ffffff;
+    }
+    .fs-btn-pause:hover {
+      background: #d97706;
+    }
+
+    .fs-btn-group-breakdown {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 6px;
+      padding: 2px 3px;
+    }
+
+    [data-theme="dark"] .fs-btn-group-breakdown {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .fs-van-select {
+      font-size: 11px;
+      font-weight: 600;
+      background: transparent;
+      border: none;
+      color: #b91c1c;
+      padding: 4px 6px;
+      outline: none;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+
+    [data-theme="dark"] .fs-van-select {
+      color: #f87171;
+    }
+
+    .fs-btn-breakdown {
+      background: #ef4444;
+      color: #ffffff;
+      padding: 5px 10px;
+      border-radius: 4px;
+    }
+    .fs-btn-breakdown:hover {
+      background: #dc2626;
+    }
+
+    .fs-btn-rush {
+      background: #3b82f6;
+      color: #ffffff;
+    }
+    .fs-btn-rush:hover {
+      background: #2563eb;
+    }
+
+    .fs-btn-ghost {
+      background: transparent;
+      color: #71717a;
+      border: 1px solid #e4e4e7;
+    }
+    .fs-btn-ghost:hover {
+      background: #f4f4f5;
+      color: #09090b;
+    }
+
+    [data-theme="dark"] .fs-btn-ghost {
+      border-color: #27272a;
+      color: #a1a1aa;
+    }
+    [data-theme="dark"] .fs-btn-ghost:hover {
+      background: #27272a;
+      color: #f4f4f5;
+    }
+
+    .fs-btn-disabled {
+      opacity: 0.5;
+      cursor: not-allowed !important;
+      pointer-events: none;
+    }
+
+    /* Fullscreen Right-Side Van Telemetry Table */
+    .fullscreen-van-panel {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      width: 324px;
+      max-height: calc(100vh - 110px);
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid #e4e4e7;
+      border-radius: 10px;
+      box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+      flex-direction: column;
+      overflow: hidden;
+      animation: fsSlideLeft 0.22s ease-out;
+    }
+
+    [data-theme="dark"] .fullscreen-van-panel {
+      background: rgba(24, 24, 27, 0.95);
+      border-color: #27272a;
+      color: #f4f4f5;
+    }
+
+    @keyframes fsSlideLeft {
+      from { transform: translateX(20px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    .fs-panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: rgba(248, 250, 252, 0.8);
+      border-bottom: 1px solid #e4e4e7;
+    }
+
+    [data-theme="dark"] .fs-panel-header {
+      background: rgba(39, 39, 42, 0.6);
+      border-color: #27272a;
+    }
+
+    .fs-panel-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .fs-live-dot {
+      width: 7px;
+      height: 7px;
+      background: #10b981;
+      border-radius: 50%;
+      box-shadow: 0 0 6px #10b981;
+      display: inline-block;
+    }
+
+    .fs-panel-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #09090b;
+    }
+
+    [data-theme="dark"] .fs-panel-title {
+      color: #f4f4f5;
+    }
+
+    .fs-fleet-count {
+      font-size: 10px;
+      font-weight: 600;
+      color: #71717a;
+    }
+
+    .fs-table-container {
+      overflow-y: auto;
+      max-height: calc(100vh - 160px);
+    }
+
+    .fs-van-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 10px;
+    }
+
+    .fs-van-table th {
+      text-align: left;
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      color: #71717a;
+      padding: 6px 7px;
+      border-bottom: 1px solid #e4e4e7;
+      background: rgba(248, 250, 252, 0.5);
+    }
+
+    [data-theme="dark"] .fs-van-table th {
+      border-color: #27272a;
+      background: rgba(24, 24, 27, 0.5);
+      color: #a1a1aa;
+    }
+
+    .fs-van-table td {
+      padding: 5px 7px;
+      border-bottom: 1px solid #f1f5f9;
+      vertical-align: middle;
+    }
+
+    [data-theme="dark"] .fs-van-table td {
+      border-color: #27272a;
+    }
+
+    .fs-van-row:hover {
+      background: rgba(241, 245, 249, 0.5);
+    }
+
+    [data-theme="dark"] .fs-van-row:hover {
+      background: rgba(39, 39, 42, 0.4);
+    }
+
+    .row-broken {
+      background: #fef2f2 !important;
+    }
+
+    [data-theme="dark"] .row-broken {
+      background: rgba(239, 68, 68, 0.12) !important;
+    }
+
+    .fs-col-van {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-weight: 600;
+    }
+
+    .fs-van-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .fs-status-pill {
+      font-size: 8.5px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    .status-transit {
+      background: #ecfdf5;
+      color: #059669;
+    }
+
+    .status-depot {
+      background: #eff6ff;
+      color: #2563eb;
+    }
+
+    .status-stop {
+      background: #fffbeb;
+      color: #d97706;
+    }
+
+    .status-broken {
+      background: #fee2e2;
+      color: #ef4444;
+      font-weight: 700;
+    }
+
+    .status-completed {
+      background: #f1f5f9;
+      color: #475569;
+    }
+
+    .fs-prog-wrapper {
+      width: 38px;
+      height: 4px;
+      background: #e2e8f0;
+      border-radius: 9999px;
+      overflow: hidden;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    [data-theme="dark"] .fs-prog-wrapper {
+      background: #3f3f46;
+    }
+
+    .fs-prog-bar {
+      height: 100%;
+      border-radius: 9999px;
+      transition: width 0.2s ease;
+    }
+
+    .fs-prog-text {
+      font-size: 8.5px;
+      font-weight: 600;
+      color: #64748b;
+    }
+
+    .fs-col-stop, .fs-col-cap {
+      font-variant-numeric: tabular-nums;
+      color: #475569;
+    }
+
+    [data-theme="dark"] .fs-col-stop,
+    [data-theme="dark"] .fs-col-cap {
+      color: #a1a1aa;
+    }
   </style>
 </head>
 <body>
@@ -370,7 +828,85 @@
         <span>Rush Demand (Mid-day)</span>
       </div>
       <div id="legend-geo-info" style="font-size: 8.5px; color: #71717a; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 2px;">
-        100% Continental Land Grid (Dallas Logistics Hub)
+        Active Logistics Hub (Road Grid)
+      </div>
+    </div>
+
+    <!-- Fullscreen Floating Bottom Control Bar -->
+    <div id="fs-bottom-bar" class="fullscreen-bottom-bar">
+      <div class="fs-bar-section fs-bar-status">
+        <span id="fs-sim-state-badge" class="fs-state-badge fs-badge-amber">Paused</span>
+        <span id="fs-clock-display" class="fs-clock-tag">T = 0.0s</span>
+      </div>
+      <div class="fs-bar-divider"></div>
+      <div class="fs-bar-section fs-bar-controls">
+        <button id="fs-btn-toggle-sim" class="fs-btn fs-btn-resume" onclick="onFsToggleSim()" title="Stop / Resume Simulation">
+          <svg id="fs-icon-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+          <svg id="fs-icon-pause" style="display:none;" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+          <span id="fs-text-toggle-sim">Resume</span>
+        </button>
+
+        <div class="fs-btn-group-breakdown">
+          <select id="fs-select-breakdown-van" class="fs-van-select" title="Select Van to Breakdown">
+            <option value="1">Van 1</option>
+          </select>
+          <button id="fs-btn-breakdown" class="fs-btn fs-btn-breakdown" onclick="onFsBreakdown()" title="Trigger Mechanical Breakdown">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+            </svg>
+            <span>Breakdown</span>
+          </button>
+        </div>
+
+        <button id="fs-btn-rush-orders" class="fs-btn fs-btn-rush" onclick="onFsAddRushOrder()" title="Inject Dynamic Rush Customer Demand">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="16"></line>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
+          </svg>
+          <span>+3 Rush Orders</span>
+        </button>
+      </div>
+      <div class="fs-bar-divider"></div>
+      <div class="fs-bar-section">
+        <button class="fs-btn fs-btn-ghost" onclick="toggleMapFullscreen()" title="Exit Fullscreen View">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
+          </svg>
+          <span>Exit</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Fullscreen Right-Side Small Van Telemetry Table -->
+    <div id="fs-van-panel" class="fullscreen-van-panel">
+      <div class="fs-panel-header">
+        <div class="fs-panel-title-wrap">
+          <span class="fs-live-dot"></span>
+          <span class="fs-panel-title">Fleet Telemetry</span>
+        </div>
+        <span id="fs-table-fleet-count" class="fs-fleet-count">0 Active</span>
+      </div>
+      <div class="fs-table-container">
+        <table class="fs-van-table">
+          <thead>
+            <tr>
+              <th>Van</th>
+              <th>Status</th>
+              <th>Progress</th>
+              <th>Stop</th>
+              <th>Cap</th>
+            </tr>
+          </thead>
+          <tbody id="fs-van-table-body">
+            <!-- Populated dynamically on render -->
+          </tbody>
+        </table>
       </div>
     </div>
   </div>
@@ -545,31 +1081,77 @@
     }
 
     // =========================================================================
-    // Fullscreen Toggle Control
+    // Fullscreen Controls & Real-Time Action Messaging
     // =========================================================================
+    let currentIsSimulating = false;
+    let currentIsCompleted = false;
+    let currentVehicles = [];
+    let currentBrokenVehicles = [];
+
+    function triggerStreamlitAction(action, payload = {}) {
+      sendToStreamlit("streamlit:setComponentValue", {
+        value: {
+          action: action,
+          timestamp: Date.now(),
+          ...payload
+        }
+      });
+    }
+
+    function onFsToggleSim() {
+      if (currentIsCompleted) return;
+      const nextAction = currentIsSimulating ? 'pause' : 'resume';
+      currentIsSimulating = !currentIsSimulating;
+      updateFullscreenBottomBar(currentIsSimulating, currentIsCompleted, currentVehicles, currentBrokenVehicles);
+      triggerStreamlitAction(nextAction);
+    }
+
+    function onFsBreakdown() {
+      const select = document.getElementById('fs-select-breakdown-van');
+      const vId = select ? parseInt(select.value, 10) : null;
+      if (!vId) return;
+      triggerStreamlitAction('breakdown', { vehicle_id: vId });
+    }
+
+    function onFsAddRushOrder() {
+      triggerStreamlitAction('add_rush_orders');
+    }
+
     function toggleMapFullscreen() {
       const wrapper = document.getElementById('map-wrapper');
       const isFs = document.fullscreenElement || document.webkitFullscreenElement;
 
-      if (!isFs) {
+      if (!isFs && !wrapper.classList.contains('is-fullscreen')) {
+        wrapper.classList.add('is-fullscreen');
         if (wrapper.requestFullscreen) {
-          wrapper.requestFullscreen();
+          wrapper.requestFullscreen().catch(() => {});
         } else if (wrapper.webkitRequestFullscreen) {
-          wrapper.webkitRequestFullscreen();
-        } else if (document.documentElement.requestFullscreen) {
-          document.documentElement.requestFullscreen();
+          wrapper.webkitRequestFullscreen().catch(() => {});
         }
       } else {
-        if (document.exitFullscreen) {
-          document.exitFullscreen();
-        } else if (document.webkitExitFullscreen) {
-          document.webkitExitFullscreen();
+        wrapper.classList.remove('is-fullscreen');
+        if (document.exitFullscreen && (document.fullscreenElement || document.webkitFullscreenElement)) {
+          document.exitFullscreen().catch(() => {});
+        } else if (document.webkitExitFullscreen && (document.fullscreenElement || document.webkitFullscreenElement)) {
+          document.webkitExitFullscreen().catch(() => {});
         }
       }
+      const expandIcon = document.getElementById('fs-expand-icon');
+      const collapseIcon = document.getElementById('fs-collapse-icon');
+      const activeFs = wrapper.classList.contains('is-fullscreen') || !!(document.fullscreenElement || document.webkitFullscreenElement);
+      if (expandIcon) expandIcon.style.display = activeFs ? 'none' : 'block';
+      if (collapseIcon) collapseIcon.style.display = activeFs ? 'block' : 'none';
+      setTimeout(() => { if (map) map.invalidateSize(); }, 80);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 250);
     }
 
     document.addEventListener('fullscreenchange', () => {
       const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      const wrapper = document.getElementById('map-wrapper');
+      if (wrapper) {
+        if (isFs) wrapper.classList.add('is-fullscreen');
+        else wrapper.classList.remove('is-fullscreen');
+      }
       const expandIcon = document.getElementById('fs-expand-icon');
       const collapseIcon = document.getElementById('fs-collapse-icon');
       if (expandIcon) expandIcon.style.display = isFs ? 'none' : 'block';
@@ -578,6 +1160,160 @@
         if (map) map.invalidateSize();
       }, 150);
     });
+
+    function updateFullscreenBottomBar(isSimulating, isCompleted, vehicles, brokenVehicles, simTime) {
+      if (isSimulating !== undefined) currentIsSimulating = !!isSimulating;
+      if (isCompleted !== undefined) currentIsCompleted = !!isCompleted;
+      if (vehicles) currentVehicles = vehicles;
+      if (brokenVehicles) currentBrokenVehicles = brokenVehicles;
+
+      const btnToggle = document.getElementById('fs-btn-toggle-sim');
+      const iconPlay = document.getElementById('fs-icon-play');
+      const iconPause = document.getElementById('fs-icon-pause');
+      const textToggle = document.getElementById('fs-text-toggle-sim');
+
+      if (btnToggle && iconPlay && iconPause && textToggle) {
+        if (currentIsCompleted) {
+          btnToggle.disabled = true;
+          btnToggle.className = 'fs-btn fs-btn-disabled';
+          iconPlay.style.display = 'inline-block';
+          iconPause.style.display = 'none';
+          textToggle.textContent = 'Completed';
+        } else if (currentIsSimulating) {
+          btnToggle.disabled = false;
+          btnToggle.className = 'fs-btn fs-btn-pause';
+          iconPlay.style.display = 'none';
+          iconPause.style.display = 'inline-block';
+          textToggle.textContent = 'Pause';
+        } else {
+          btnToggle.disabled = false;
+          btnToggle.className = 'fs-btn fs-btn-resume';
+          iconPlay.style.display = 'inline-block';
+          iconPause.style.display = 'none';
+          textToggle.textContent = 'Resume';
+        }
+      }
+
+      const badgeDom = document.getElementById('fs-sim-state-badge');
+      if (badgeDom) {
+        if (currentIsCompleted) {
+          badgeDom.className = 'fs-state-badge fs-badge-blue';
+          badgeDom.textContent = 'Complete';
+        } else if (currentIsSimulating) {
+          badgeDom.className = 'fs-state-badge fs-badge-green';
+          badgeDom.textContent = 'Simulating';
+        } else {
+          badgeDom.className = 'fs-state-badge fs-badge-amber';
+          badgeDom.textContent = 'Paused';
+        }
+      }
+
+      const clockDom = document.getElementById('fs-clock-display');
+      if (clockDom && simTime !== undefined) {
+        clockDom.textContent = `T = ${Number(simTime).toFixed(1)}s`;
+      }
+
+      const brokenSet = new Set(currentBrokenVehicles || []);
+      const selectBreakdown = document.getElementById('fs-select-breakdown-van');
+      const btnBreakdown = document.getElementById('fs-btn-breakdown');
+
+      if (selectBreakdown && currentVehicles && currentVehicles.length > 0) {
+        const prevVal = selectBreakdown.value;
+        selectBreakdown.innerHTML = '';
+        let hasActive = false;
+        currentVehicles.forEach((veh) => {
+          const vId = veh.vehicle_id;
+          if (!brokenSet.has(vId) && !veh.is_broken) {
+            hasActive = true;
+            const opt = document.createElement('option');
+            opt.value = vId;
+            opt.textContent = `Van ${vId}`;
+            selectBreakdown.appendChild(opt);
+          }
+        });
+
+        if (prevVal && Array.from(selectBreakdown.options).some(o => o.value === prevVal)) {
+          selectBreakdown.value = prevVal;
+        }
+
+        if (btnBreakdown) {
+          btnBreakdown.disabled = !hasActive;
+          if (!hasActive) {
+            btnBreakdown.classList.add('fs-btn-disabled');
+          } else {
+            btnBreakdown.classList.remove('fs-btn-disabled');
+          }
+        }
+      }
+    }
+
+    function updateFullscreenVanTable(vehicles, brokenVehicles) {
+      const container = document.getElementById('fs-van-table-body');
+      if (!container || !vehicles) return;
+
+      const brokenSet = new Set(brokenVehicles || []);
+      let activeCount = 0;
+      let brokenCount = 0;
+
+      let rowsHtml = '';
+      vehicles.forEach((veh) => {
+        const vId = veh.vehicle_id;
+        const isBroken = brokenSet.has(vId) || veh.is_broken;
+        if (isBroken) brokenCount++;
+        else activeCount++;
+
+        const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
+
+        let statusClass = 'status-transit';
+        let statusLabel = 'In Transit';
+        const rawStatus = (veh.status || '').toLowerCase();
+
+        if (isBroken) {
+          statusClass = 'status-broken';
+          statusLabel = 'OFFLINE';
+        } else if (rawStatus.includes('depot')) {
+          statusClass = 'status-depot';
+          statusLabel = 'At Depot';
+        } else if (rawStatus.includes('stop') || rawStatus.includes('service') || rawStatus.includes('wait')) {
+          statusClass = 'status-stop';
+          statusLabel = 'At Stop';
+        } else if (rawStatus.includes('completed')) {
+          statusClass = 'status-completed';
+          statusLabel = 'Completed';
+        }
+
+        const progress = Math.min(100, Math.max(0, veh.route_progress || 0)).toFixed(0);
+        const waypoint = veh.waypoint_index !== undefined ? `#${veh.waypoint_index}` : '-';
+        const remCap = veh.remaining_capacity !== undefined ? veh.remaining_capacity : '-';
+
+        rowsHtml += `
+          <tr class="fs-van-row ${isBroken ? 'row-broken' : ''}">
+            <td class="fs-col-van">
+              <span class="fs-van-dot" style="background-color: ${isBroken ? '#ef4444' : color};"></span>
+              <span style="font-weight: 700; color: ${isBroken ? '#ef4444' : 'inherit'};">Van ${vId}</span>
+            </td>
+            <td>
+              <span class="fs-status-pill ${statusClass}">${statusLabel}</span>
+            </td>
+            <td>
+              <div class="fs-prog-wrapper">
+                <div class="fs-prog-bar" style="width: ${progress}%; background-color: ${isBroken ? '#ef4444' : color};"></div>
+              </div>
+              <span class="fs-prog-text">${progress}%</span>
+            </td>
+            <td class="fs-col-stop">${waypoint}</td>
+            <td class="fs-col-cap">${remCap}</td>
+          </tr>
+        `;
+      });
+
+      container.innerHTML = rowsHtml;
+
+      const countDom = document.getElementById('fs-table-fleet-count');
+      if (countDom) {
+        countDom.textContent = `${activeCount} Active • ${brokenCount} Offline`;
+      }
+    }
 
     // =========================================================================
     // 60 FPS Browser Kinematics Loop (Smooth Road Tracking)
@@ -637,9 +1373,18 @@
     // =========================================================================
     // Streamlit Message Listener
     // =========================================================================
+    let hasReceivedFirstRender = false;
+    let readyIntervalId = null;
+
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (!msg || msg.type !== 'streamlit:render') return;
+
+      hasReceivedFirstRender = true;
+      if (readyIntervalId !== null) {
+        clearInterval(readyIntervalId);
+        readyIntervalId = null;
+      }
 
       const args = msg.args;
       if (!args) return;
@@ -901,20 +1646,66 @@
 
       // 8. Start / maintain continuous 60 FPS interpolation loop
       startKinematicsLoop();
+
+      // Synchronize Fullscreen State & Overlays
+      if (args.is_expanded) {
+        wrapElem.classList.add('is-fullscreen');
+      }
+      updateFullscreenBottomBar(
+        args.is_simulating,
+        args.is_completed,
+        args.vehicles,
+        args.broken_vehicles,
+        args.sim_time
+      );
+      updateFullscreenVanTable(args.vehicles, args.broken_vehicles);
+
       setFrameHeight(componentHeight);
       setTimeout(() => { if (map) map.invalidateSize(); }, 60);
       setTimeout(() => { if (map) map.invalidateSize(); }, 250);
     });
 
-    // Initialize Map and notify Streamlit as soon as DOM is ready
-    window.addEventListener('DOMContentLoaded', () => {
+    // Initialize Map and notify Streamlit immediately and reliably
+    function notifyStreamlitReady() {
       initMapOnce();
       sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
       setFrameHeight(componentHeight);
-      setTimeout(() => { if (map) map.invalidateSize(); }, 80);
-      setTimeout(() => { if (map) map.invalidateSize(); }, 350);
-      setTimeout(() => { if (map) map.invalidateSize(); }, 800);
-    });
+      setTimeout(() => { if (map) map.invalidateSize(true); }, 50);
+      setTimeout(() => { if (map) map.invalidateSize(true); }, 200);
+      setTimeout(() => { if (map) map.invalidateSize(true); }, 500);
+      setTimeout(() => { if (map) map.invalidateSize(true); }, 1200);
+    }
+
+    // 1. Execute immediately in case DOM is already parsed
+    notifyStreamlitReady();
+
+    // 2. Also bind to lifecycle events in case document is still parsing
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', notifyStreamlitReady);
+      window.addEventListener('load', notifyStreamlitReady);
+    }
+
+    // 3. Handshake retry loop: repeat componentReady every 200ms until first render received
+    let retryCount = 0;
+    readyIntervalId = setInterval(() => {
+      if (hasReceivedFirstRender || retryCount > 25) {
+        clearInterval(readyIntervalId);
+        readyIntervalId = null;
+        return;
+      }
+      retryCount++;
+      sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
+      setFrameHeight(componentHeight);
+      if (map) map.invalidateSize(true);
+    }, 200);
+
+    // Final safety timeout to clean up interval after 8 seconds
+    setTimeout(() => {
+      if (readyIntervalId !== null) {
+        clearInterval(readyIntervalId);
+        readyIntervalId = null;
+      }
+    }, 8000);
   </script>
 </body>
 </html>
