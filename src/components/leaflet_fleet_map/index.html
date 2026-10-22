@@ -494,14 +494,16 @@
           const dLon = kine.targetLon - kine.currentLon;
           const dist = Math.hypot(dLat, dLon);
 
-          if (dist > 0.00002) {
-            // Smooth exponential lerp
-            const stepFactor = Math.min(1.0, dt * 7.5);
+          if (dist > 0.00001) {
+            // Smooth road interpolation
+            const stepFactor = Math.min(1.0, dt * 8.0);
             kine.currentLat += dLat * stepFactor;
             kine.currentLon += dLon * stepFactor;
 
-            // Heading angle in degrees
-            const angleDeg = (Math.atan2(dLon, dLat) * 180 / Math.PI);
+            // Street-aligned heading angle
+            const angleDeg = (kine.targetHeading !== undefined && kine.targetHeading !== 0) 
+              ? kine.targetHeading 
+              : (Math.atan2(dLon, dLat) * 180 / Math.PI);
             kine.heading = angleDeg;
 
             kine.marker.setLatLng([kine.currentLat, kine.currentLon]);
@@ -513,6 +515,10 @@
             kine.currentLat = kine.targetLat;
             kine.currentLon = kine.targetLon;
             kine.marker.setLatLng([kine.currentLat, kine.currentLon]);
+            if (kine.targetHeading !== undefined) {
+              const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
+              kine.marker.setIcon(createVehicleIcon(vId, color, false, kine.targetHeading));
+            }
           }
         });
 
@@ -733,7 +739,8 @@
             targetLon: targetLon,
             speed: veh.speed || 1.0,
             isBroken: isBroken,
-            heading: 0,
+            heading: veh.heading || 0,
+            targetHeading: veh.heading || 0,
             status: veh.status
           });
         } else {
@@ -741,6 +748,7 @@
           const kine = vehicleKinematics.get(vId);
           kine.targetLat = targetLat;
           kine.targetLon = targetLon;
+          kine.targetHeading = veh.heading !== undefined ? Number(veh.heading) : kine.heading;
           kine.speed = veh.speed || 1.0;
           kine.isBroken = isBroken;
           kine.status = veh.status;

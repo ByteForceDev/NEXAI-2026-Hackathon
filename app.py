@@ -28,7 +28,7 @@ from src.geo_projection import (
     set_active_anchor,
     xy_to_latlon,
 )
-from src.road_routing import RoadRoutingService
+from src.road_routing import RoadRoutingService, interpolate_along_road_coordinates
 from src.components.leaflet_fleet_map import leaflet_fleet_map
 
 # ==============================================================================
@@ -1326,6 +1326,8 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
     total_fleet_count = min(len(sim_state.vehicles), max_active_id + 1)
 
     routes_payload = []
+    legs_by_vid = {}
+
     for v_id in range(1, total_fleet_count + 1):
         group = grouped_routes.get(v_id)
         waypoints_latlon = []
@@ -1340,16 +1342,17 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
                     assigned_jobs += 1
 
         if waypoints_latlon:
-            road_res = RoadRoutingService.get_road_polyline(waypoints_latlon)
+            full_coords, legs = RoadRoutingService.get_route_legs_and_polyline(waypoints_latlon)
+            legs_by_vid[v_id] = legs
             routes_payload.append({
                 "vehicle_id": v_id,
-                "road_coordinates": road_res.get("coordinates", []),
-                "provider": road_res.get("provider", "OSRM Road Network"),
+                "road_coordinates": full_coords,
+                "provider": "OSRM OpenStreetMap Road Network",
                 "assigned_packages": assigned_jobs,
                 "is_broken": (v_id in sim_state.broken_vehicles),
             })
 
-    # Vehicles authoritative positions (unscaled continuous X, Y mapped to lat, lon)
+    # Vehicles authoritative positions strictly computed along road polylines
     veh_positions = sim_state.get_interpolated_vehicle_positions()
     vehicles_payload = []
     for v_id in range(1, total_fleet_count + 1):
@@ -1362,8 +1365,28 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
             "speed": 1.0,
             "route_progress": 0.0,
             "waypoint_index": 0,
+            "leg_alpha": 0.0,
         })
-        v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"])
+        is_broken = bool(p_info.get("is_broken", False))
+        is_active = bool(p_info.get("is_active", False))
+        status_str = str(p_info.get("status", "Active"))
+
+        # Exact road path position calculation
+        heading = 0.0
+        if is_broken:
+            v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"])
+        elif not is_active or "At Depot" in status_str:
+            v_lat, v_lon = (depot_lat, depot_lon)
+        else:
+            legs = legs_by_vid.get(v_id, [])
+            leg_idx = int(p_info.get("waypoint_index", 0))
+            alpha = float(p_info.get("leg_alpha", 0.0))
+            if legs and 0 <= leg_idx < len(legs):
+                curr_leg = legs[leg_idx]
+                v_lat, v_lon, heading = interpolate_along_road_coordinates(curr_leg, alpha)
+            else:
+                v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"])
+
         rem_cap = (
             int(sim_state.vehicles[v_id].remaining_capacity)
             if v_id in sim_state.vehicles
@@ -1373,9 +1396,10 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
             "vehicle_id": v_id,
             "lat": v_lat,
             "lon": v_lon,
-            "is_broken": bool(p_info.get("is_broken", False)),
-            "is_active": bool(p_info.get("is_active", False)),
-            "status": str("OFFLINE" if p_info.get("is_broken", False) else p_info.get("status", "Active")),
+            "heading": heading,
+            "is_broken": is_broken,
+            "is_active": is_active,
+            "status": str("OFFLINE" if is_broken else status_str),
             "waypoint_index": int(p_info.get("waypoint_index", 0)),
             "distance_to_next_waypoint": float(p_info.get("distance_to_next_waypoint", 0.0)),
             "speed": float(p_info.get("speed", 1.0)),
