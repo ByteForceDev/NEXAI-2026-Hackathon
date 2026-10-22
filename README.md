@@ -1,15 +1,9 @@
----
-**Title:** NEXAI 2026 Autonomous Dynamic Route Engine
-
-license: mit
----
-
 # NEXAI 2026 Hackathon: Autonomous Dynamic Route Engine
 
 **Track 4:** AI for Supply Chain & Logistics  
 **Problem Statement 4.3:** Last-Mile Route Planner with Live Re-planning (VRPTW)  
 **Team Name:** ByteForceDev  
-**Deployment:** [Live Application Demo - Hugging Face Spaces](https://huggingface.co/spaces/insert-link-here)
+**Deployment:** [Yet To Be Deployed](#)
 
 ---
 
@@ -167,7 +161,7 @@ Access the application at `http://localhost:7860`.
 
 ## 4. Deployment URL
 
-* **Hugging Face Spaces:** [Live Application Demo - Hugging Face Spaces](https://huggingface.co/spaces/insert-link-here)
+* **Hugging Face Spaces:** [Yet To Be Deployed](#)
 
 ---
 
