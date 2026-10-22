@@ -4,6 +4,7 @@ Problem Statement 4.3: Last-Mile Route Planner with Live Re-planning (VRPTW)
 Optimization Engine: pyvroom (High-performance VROOM C++ Bindings)
 
 Interactive Dispatcher Dashboard with Autonomous Simulation Loop and Live Disruption Engine.
+Light Mode Shadcn UI design with high-contrast monochrome palette, subtle accents, and Poppins typography.
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,48 +20,241 @@ from src.simulator import SimulationState
 from src.utils import resolve_location_index, unscale_value
 from src.vrptw_solver import create_vroom_problem
 
-# Set broad responsive layout and dark-friendly title
+# Page Configuration: Clean, minimal, light mode
 st.set_page_config(
-    page_title="NEXAI 2026 | Last-Mile VRPTW Dispatcher",
-    page_icon="🚚",
+    page_title="NEXAI | Autonomous Route Engine",
+    page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# Custom enterprise CSS for sleek modern dispatcher interface
+# Shadcn UI Light Mode Design System & Global Styles
 st.markdown(
     """
     <style>
-    /* Metric card styling */
-    [data-testid="stMetricValue"] {
-        font-size: 1.8rem !important;
-        font-weight: 700 !important;
-        color: #38bdf8 !important;
+    /* Google Fonts: Poppins & Material Symbols */
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200');
+
+    /* Global Typography (Excluding Material Icons) */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stSidebar"],
+    [data-testid="stHeader"], p, h1, h2, h3, h4, h5, h6, input, select, textarea,
+    [data-testid="stMetricLabel"], [data-testid="stMetricValue"], [data-testid="stMetricDelta"],
+    .section-title, .control-label, [data-baseweb="tab"] {
+        font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     }
-    [data-testid="stMetricLabel"] {
-        font-size: 0.9rem !important;
+
+    button p, button span:not([data-testid="stIconMaterial"]):not([class*="material-symbols"]) {
+        font-family: 'Poppins', sans-serif !important;
+    }
+
+    /* Crucial: Explicitly protect and style Material Symbols font ligatures */
+    [data-testid="stIconMaterial"],
+    .material-symbols-rounded,
+    .material-symbols-outlined,
+    [class*="material-symbols"] {
+        font-family: 'Material Symbols Rounded', 'Material Symbols Outlined' !important;
+        font-weight: normal !important;
+        font-style: normal !important;
+        font-size: 1.2rem !important;
+        line-height: 1 !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        letter-spacing: normal !important;
+        text-transform: none !important;
+        white-space: nowrap !important;
+        word-wrap: normal !important;
+        direction: ltr !important;
+        -webkit-font-smoothing: antialiased !important;
+        text-rendering: optimizeLegibility !important;
+    }
+
+    /* Base Canvas (Pure Light) */
+    .stApp {
+        background-color: #ffffff !important;
+        color: #09090b !important;
+    }
+
+    /* Minimalist Light Scrollbars */
+    ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #ffffff;
+    }
+    ::-webkit-scrollbar-thumb {
+        background: #e4e4e7;
+        border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background: #d4d4d8;
+    }
+
+    /* Top Navigation Header */
+    [data-testid="stHeader"] {
+        background-color: rgba(255, 255, 255, 0.85) !important;
+        backdrop-filter: blur(12px) !important;
+        border-bottom: 1px solid #e4e4e7 !important;
+    }
+
+    /* Sidebar Styling */
+    [data-testid="stSidebar"] {
+        background-color: #f8fafc !important;
+        border-right: 1px solid #e4e4e7 !important;
+    }
+    [data-testid="stSidebar"] hr {
+        border-color: #e4e4e7 !important;
+        margin: 1rem 0 !important;
+    }
+
+    /* Metric KPI Cards (Shadcn Light Dashboard style) */
+    [data-testid="stMetric"] {
+        background: #ffffff !important;
+        border: 1px solid #e4e4e7 !important;
+        border-radius: 8px !important;
+        padding: 1rem 1.25rem !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    [data-testid="stMetric"]:hover {
+        border-color: #d4d4d8 !important;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05) !important;
+    }
+    [data-testid="stMetricLabel"] p {
+        font-size: 0.72rem !important;
+        text-transform: uppercase !important;
+        letter-spacing: 0.06em !important;
         font-weight: 500 !important;
-        color: #94a3b8 !important;
+        color: #71717a !important;
+        margin-bottom: 0.25rem !important;
     }
-    .dispatch-header {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-        border: 1px solid #334155;
-        border-radius: 12px;
-        padding: 1.2rem 1.5rem;
-        margin-bottom: 1.2rem;
+    [data-testid="stMetricValue"] {
+        font-size: 1.65rem !important;
+        font-weight: 600 !important;
+        color: #09090b !important;
+        letter-spacing: -0.02em !important;
     }
-    .badge {
-        display: inline-block;
-        padding: 0.25rem 0.6rem;
-        border-radius: 6px;
-        font-size: 0.75rem;
+    [data-testid="stMetricDelta"] {
+        font-size: 0.75rem !important;
+        font-weight: 400 !important;
+        color: #71717a !important;
+    }
+
+    /* Buttons: Shadcn Light Mode styling */
+    button {
+        font-size: 0.85rem !important;
+        border-radius: 6px !important;
+        transition: all 0.15s ease !important;
+    }
+    /* Primary Action Button (Solid Crisp Black with White Text) */
+    button[kind="primary"] {
+        background-color: #09090b !important;
+        color: #ffffff !important;
+        border: 1px solid #09090b !important;
+        font-weight: 500 !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: #27272a !important;
+        border-color: #27272a !important;
+        color: #ffffff !important;
+    }
+    button[kind="primary"] [data-testid="stIconMaterial"],
+    button[kind="primary"] [class*="material-symbols"] {
+        color: #ffffff !important;
+    }
+
+    /* Secondary Action Button (Crisp White with Subtle Border) */
+    button[kind="secondary"] {
+        background-color: #ffffff !important;
+        color: #09090b !important;
+        border: 1px solid #e4e4e7 !important;
+        font-weight: 500 !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+    }
+    button[kind="secondary"]:hover {
+        background-color: #f4f4f5 !important;
+        border-color: #d4d4d8 !important;
+        color: #09090b !important;
+    }
+    button[kind="secondary"] [data-testid="stIconMaterial"],
+    button[kind="secondary"] [class*="material-symbols"] {
+        color: #09090b !important;
+    }
+    button:disabled {
+        opacity: 0.45 !important;
+        cursor: not-allowed !important;
+    }
+
+    /* Tabs (Shadcn Light Segmented Control style) */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #f4f4f5 !important;
+        border: 1px solid #e4e4e7 !important;
+        border-radius: 8px !important;
+        padding: 4px !important;
+        gap: 4px !important;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 34px !important;
+        border-radius: 6px !important;
+        padding: 0 16px !important;
+        color: #71717a !important;
+        font-weight: 500 !important;
+        font-size: 0.82rem !important;
+        border: none !important;
+        background: transparent !important;
+        transition: all 0.15s ease !important;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #ffffff !important;
+        color: #09090b !important;
+        font-weight: 600 !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+    }
+    .stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] {
+        display: none !important;
+    }
+
+    /* DataFrames */
+    [data-testid="stDataFrame"] {
+        border: 1px solid #e4e4e7 !important;
+        border-radius: 8px !important;
+        overflow: hidden !important;
+        background: #ffffff !important;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+    }
+
+    /* Section Subheadings */
+    h2, h3, h4 {
+        color: #09090b !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.01em !important;
+    }
+    .section-title {
+        font-size: 1.05rem;
         font-weight: 600;
-        margin-right: 0.5rem;
+        color: #09090b;
+        margin-bottom: 0.5rem;
     }
-    .badge-track { background-color: #0369a1; color: #e0f2fe; }
-    .badge-problem { background-color: #065f46; color: #d1fae5; }
-    .badge-engine { background-color: #6b21a8; color: #f3e8ff; }
-    .badge-status { background-color: #1e293b; border: 1px solid #475569; color: #f8fafc; }
+    .control-label {
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #71717a;
+        margin-bottom: 0.4rem;
+    }
+
+    /* Toast Notification Styling */
+    [data-testid="stToast"] {
+        background-color: #ffffff !important;
+        border: 1px solid #e4e4e7 !important;
+        color: #09090b !important;
+        border-radius: 8px !important;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -72,7 +266,7 @@ st.markdown(
 # ==============================================================================
 def init_simulation_state() -> None:
     """Initialize the problem instance, distance matrix, and baseline VROOM solution."""
-    with st.spinner("Initializing Solomon C101 Benchmark & pyvroom engine..."):
+    with st.spinner("Initializing Solomon C101 Benchmark and pyvroom engine..."):
         instance = parse_solomon_instance("data/C101_25.txt", max_customers=25)
         distance_matrix = instance.compute_distance_matrix()
 
@@ -129,28 +323,25 @@ def get_node_coords(sim_state: SimulationState, loc_idx: int) -> Tuple[float, fl
 
 
 # ==============================================================================
-# 3. Plotly Route & Map Visualization
+# 3. Plotly Route & Map Visualization (Light Mode Minimalist Palette)
 # ==============================================================================
+# High-contrast modern palette optimized for light mode canvas
 ROUTE_COLORS = [
-    "#38bdf8",  # Sky Blue
-    "#f43f5e",  # Vibrant Rose
-    "#10b981",  # Emerald Green
-    "#fbbf24",  # Amber Gold
-    "#a855f7",  # Purple
-    "#06b6d4",  # Cyan
-    "#ec4899",  # Pink
-    "#f97316",  # Bright Orange
+    "#09090b",  # Lead Van 1 (Crisp Charcoal / Black)
+    "#2563eb",  # Van 2 (Cobalt Blue)
+    "#059669",  # Van 3 (Emerald Green)
+    "#7c3aed",  # Van 4 (Violet)
+    "#d97706",  # Van 5 (Amber)
+    "#475569",  # Van 6 (Slate)
+    "#db2777",  # Van 7 (Rose)
+    "#0891b2",  # Van 8 (Cyan)
 ]
 
 
 def plot_routes(sim_state: SimulationState) -> go.Figure:
     """
     Generate an interactive 2D spatial dispatch map with active routes and dynamic nodes.
-    
-    Guarantees:
-      - At T = 0, all active vehicles are explicitly visible at the Central Depot.
-      - In transit, vehicle positions are continuous and mathematically interpolated.
-      - Disrupted vehicles are clearly rendered with failure tags.
+    Minimalist light mode aesthetic with high-contrast routes and subtle grid.
     """
     fig = go.Figure()
 
@@ -183,8 +374,8 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                 serv_unscaled = unscale_value(step["service"], sim_state.scale_factor)
 
                 hover_text = (
-                    f"<b>Van #{v_id}</b> | Step {step_num + 1} [{step_type}]<br>"
-                    f"Stop Location: ({x:.1f}, {y:.1f})<br>"
+                    f"<b>Van #{v_id}</b> | Stop {step_num + 1} [{step_type}]<br>"
+                    f"Location: ({x:.1f}, {y:.1f})<br>"
                     f"Arrival Time: T={arr_unscaled:.1f}<br>"
                     f"Service Duration: {serv_unscaled:.1f}"
                 )
@@ -197,9 +388,9 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                     x=xs,
                     y=ys,
                     mode="lines",
-                    line=dict(color=color, width=2.8),
-                    opacity=0.85,
-                    name=f"Van #{v_id} Route",
+                    line=dict(color=color, width=2.4),
+                    opacity=0.88,
+                    name=f"Van {v_id}",
                     hoverinfo="text",
                     hovertext=hover_lines,
                 )
@@ -215,7 +406,7 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         comp_x.append(x)
         comp_y.append(y)
         comp_hover.append(
-            f"<b>Customer #{c_id} [COMPLETED]</b><br>"
+            f"<b>Customer #{c_id} [Delivered]</b><br>"
             f"Location: ({x:.1f}, {y:.1f})<br>"
             f"Delivered by Van #{info.get('vehicle_id')}<br>"
             f"Demand: {info.get('demand', '-')} units<br>"
@@ -230,13 +421,13 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                 mode="markers+text",
                 marker=dict(
                     symbol="circle",
-                    size=11,
-                    color="#10b981",  # Emerald Green
-                    line=dict(color="#064e3b", width=1.5),
+                    size=9,
+                    color="#e2e8f0",
+                    line=dict(color="#94a3b8", width=1.2),
                 ),
                 text=[f"#{cid}" for cid in sim_state.completed_jobs.keys()],
                 textposition="bottom center",
-                textfont=dict(size=9, color="#6ee7b7"),
+                textfont=dict(size=8, color="#64748b", family="Poppins, sans-serif"),
                 name=f"Completed ({len(comp_x)})",
                 hoverinfo="text",
                 hovertext=comp_hover,
@@ -260,7 +451,7 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         due_t = meta.due_date if meta else "-"
 
         hover_info = (
-            f"<b>{'[RUSH ORDER]' if is_rush else 'Customer'} #{job_id} [PENDING]</b><br>"
+            f"<b>{'[Rush Order]' if is_rush else 'Customer'} #{job_id} [Pending]</b><br>"
             f"Location: ({x:.1f}, {y:.1f})<br>"
             f"Demand: {demand} units<br>"
             f"Time Window: [{ready_t}, {due_t}]"
@@ -270,7 +461,7 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
             rush_x.append(x)
             rush_y.append(y)
             rush_hover.append(hover_info)
-            rush_labels.append(f"⚡#{job_id}")
+            rush_labels.append(f"R-{job_id}")
         else:
             pend_x.append(x)
             pend_y.append(y)
@@ -285,13 +476,13 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                 mode="markers+text",
                 marker=dict(
                     symbol="circle",
-                    size=11,
-                    color="#38bdf8",  # Sky Blue
-                    line=dict(color="#0369a1", width=1.5),
+                    size=9,
+                    color="#ffffff",
+                    line=dict(color="#09090b", width=1.5),
                 ),
                 text=pend_labels,
                 textposition="top center",
-                textfont=dict(size=9, color="#bae6fd"),
+                textfont=dict(size=8, color="#475569", family="Poppins, sans-serif"),
                 name=f"Pending Orders ({len(pend_x)})",
                 hoverinfo="text",
                 hovertext=pend_hover,
@@ -306,13 +497,13 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                 mode="markers+text",
                 marker=dict(
                     symbol="diamond",
-                    size=15,
-                    color="#f97316",  # Bright Orange
-                    line=dict(color="#ffffff", width=2),
+                    size=13,
+                    color="#f59e0b",
+                    line=dict(color="#09090b", width=1.5),
                 ),
                 text=rush_labels,
                 textposition="top right",
-                textfont=dict(size=10, color="#fed7aa", family="Arial Black"),
+                textfont=dict(size=9, color="#b45309", family="Poppins, sans-serif"),
                 name=f"Rush Orders ({len(rush_x)})",
                 hoverinfo="text",
                 hovertext=rush_hover,
@@ -330,21 +521,20 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         if p_info["is_broken"]:
             broken_x.append(p_info["x"])
             broken_y.append(p_info["y"])
-            broken_labels.append(f"💥 Van {v_id}")
+            broken_labels.append(f"Van {v_id} [Offline]")
             broken_hover.append(
-                f"<b>Van #{v_id} [DISABLED / BREAKDOWN]</b><br>"
+                f"<b>Van #{v_id} [Disabled / Breakdown]</b><br>"
                 f"Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
                 f"Status: {p_info['status']}<br>"
-                f"<i>Unfinished stops re-assigned to active fleet!</i>"
+                f"<i>Pending deliveries reassigned to active fleet.</i>"
             )
         elif p_info["is_active"]:
-            # Active in operation or pre-departure / shift completed
             van_x.append(p_info["x"])
             van_y.append(p_info["y"])
             van_labels.append(f"Van {v_id}")
             van_hover.append(
-                f"<b>Van #{v_id} [ACTIVE]</b><br>"
-                f"Live Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
+                f"<b>Van #{v_id} [Active]</b><br>"
+                f"Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
                 f"Status: {p_info['status']}<br>"
                 f"Remaining Capacity: {sim_state.vehicles[v_id].remaining_capacity} units<br>"
                 f"Completed Stops: {len(sim_state.vehicles[v_id].completed_job_ids)}"
@@ -358,14 +548,14 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                 mode="markers+text",
                 marker=dict(
                     symbol="triangle-up",
-                    size=16,
-                    color="#c084fc",  # Purple
+                    size=14,
+                    color="#09090b",
                     line=dict(color="#ffffff", width=2.0),
                 ),
                 text=van_labels,
                 textposition="bottom right",
-                textfont=dict(size=11, color="#f3e8ff", family="sans-serif"),
-                name="Van Live Positions",
+                textfont=dict(size=9, color="#09090b", family="Poppins, sans-serif"),
+                name="Active Fleet",
                 hoverinfo="text",
                 hovertext=van_hover,
             )
@@ -379,13 +569,13 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                 mode="markers+text",
                 marker=dict(
                     symbol="x",
-                    size=18,
-                    color="#ef4444",  # Crimson Red
-                    line=dict(color="#ffffff", width=2.8),
+                    size=16,
+                    color="#ef4444",
+                    line=dict(color="#ffffff", width=2.0),
                 ),
                 text=broken_labels,
                 textposition="top center",
-                textfont=dict(size=11, color="#fca5a5"),
+                textfont=dict(size=9, color="#dc2626", family="Poppins, sans-serif"),
                 name="Disabled Vehicle",
                 hoverinfo="text",
                 hovertext=broken_hover,
@@ -403,13 +593,13 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
             mode="markers+text",
             marker=dict(
                 symbol="square",
-                size=18,
-                color="#eab308",  # Gold
-                line=dict(color="#ffffff", width=2.2),
+                size=16,
+                color="#09090b",
+                line=dict(color="#ffffff", width=2.0),
             ),
             text=["DEPOT (0)"],
             textposition="bottom center",
-            textfont=dict(size=11, color="#fef08a", family="sans-serif"),
+            textfont=dict(size=10, color="#09090b", family="Poppins, sans-serif"),
             name="Central Depot",
             hoverinfo="text",
             hovertext=[
@@ -421,22 +611,25 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         )
     )
 
-    # Layout styling: sleek dark aesthetic
+    # Layout styling: clean light minimalist theme with Poppins font
     fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="#0b0f17",
-        plot_bgcolor="#111827",
+        template="plotly_white",
+        paper_bgcolor="#ffffff",
+        plot_bgcolor="#fcfcfd",
         margin=dict(l=20, r=20, t=30, b=20),
+        font=dict(family="Poppins, sans-serif", color="#64748b", size=10),
         xaxis=dict(
-            title="X Coordinate (Spatial Grid)",
-            gridcolor="#1f2937",
-            zerolinecolor="#374151",
+            title=dict(text="X Coordinate", font=dict(family="Poppins, sans-serif", size=11, color="#64748b")),
+            gridcolor="#f1f5f9",
+            zerolinecolor="#e2e8f0",
+            tickfont=dict(family="Poppins, sans-serif", color="#64748b", size=9),
             showgrid=True,
         ),
         yaxis=dict(
-            title="Y Coordinate (Spatial Grid)",
-            gridcolor="#1f2937",
-            zerolinecolor="#374151",
+            title=dict(text="Y Coordinate", font=dict(family="Poppins, sans-serif", size=11, color="#64748b")),
+            gridcolor="#f1f5f9",
+            zerolinecolor="#e2e8f0",
+            tickfont=dict(family="Poppins, sans-serif", color="#64748b", size=9),
             showgrid=True,
             scaleanchor="x",
             scaleratio=1,
@@ -447,24 +640,26 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
             y=1.02,
             xanchor="right",
             x=1,
-            bgcolor="rgba(17, 24, 39, 0.7)",
-            bordercolor="#374151",
+            bgcolor="rgba(255, 255, 255, 0.9)",
+            bordercolor="#e2e8f0",
             borderwidth=1,
-            font=dict(size=10),
+            font=dict(family="Poppins, sans-serif", size=9, color="#334155"),
         ),
         hoverlabel=dict(
-            bgcolor="#1f2937",
-            font_size=12,
-            font_family="sans-serif",
+            bgcolor="#ffffff",
+            bordercolor="#e2e8f0",
+            font_size=11,
+            font_family="Poppins, sans-serif",
+            font_color="#09090b",
         ),
-        height=540,
+        height=530,
     )
 
     return fig
 
 
 # ==============================================================================
-# 4. KPI Placeholder Renderer
+# 4. KPI Placeholder Renderer (Shadcn Light Metric Style)
 # ==============================================================================
 def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
     """Render high-contrast metric cards into the dedicated empty placeholder."""
@@ -488,114 +683,141 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
     )
 
     is_done = sim_state.is_simulation_completed()
-    clock_status = "FINISHED" if is_done else ("SIMULATING" if st.session_state.is_simulating else "PAUSED")
+    clock_status = "Complete" if is_done else ("Simulating" if st.session_state.is_simulating else "Paused")
 
     with placeholder.container():
         m1, m2, m3, m4 = st.columns(4)
         m1.metric(
             label="Total Travel Distance",
             value=f"{unscaled_dist:.1f} km",
-            delta=f"Clock: T = {st.session_state.current_time:.1f} [{clock_status}]",
+            delta=f"Clock T = {st.session_state.current_time:.1f} ({clock_status})",
+            delta_color="off",
         )
         m2.metric(
             label="Active Fleet in Transit",
             value=f"{active_in_transit} Vans",
-            delta=f"{total_active_fleet} Total Operational",
+            delta=f"{total_active_fleet} operational",
+            delta_color="off",
         )
         m3.metric(
             label="Pending Deliveries",
             value=f"{pending_cnt} Stops",
-            delta=f"{comp_cnt} Completed",
-            delta_color="inverse",
+            delta=f"{comp_cnt} completed",
+            delta_color="off",
         )
         m4.metric(
             label="Last Re-plan Latency",
             value=f"{latest_runtime:.2f} ms",
-            delta="Sub-5ms Guaranteed",
+            delta="Sub-5ms optimal",
+            delta_color="off",
         )
 
 
 # ==============================================================================
-# 5. Dashboard Header
-# ==============================================================================
-st.markdown(
-    """
-    <div class="dispatch-header">
-        <h2 style="margin: 0; color: #f8fafc; font-weight: 700;">
-            Autonomous Dynamic Route Engine & Live Re-planner
-        </h2>
-        <div style="margin-top: 0.5rem;">
-            <span class="badge badge-track">Track 4: AI for Supply Chain & Logistics</span>
-            <span class="badge badge-problem">Problem 4.3: VRPTW Dynamic Re-planning</span>
-            <span class="badge badge-engine">Engine: pyvroom (Sub-5ms Re-optimization)</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ==============================================================================
-# 6. Sidebar: Setup & Simulation Summary
+# 5. Sidebar: Setup & Simulation Summary
 # ==============================================================================
 with st.sidebar:
-    st.title("Dispatch Controls")
-    st.markdown("---")
+    st.markdown('<div class="section-title">Dispatch Controls</div>', unsafe_allow_html=True)
+    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.75rem 0 1.25rem 0;"></div>', unsafe_allow_html=True)
 
-    st.markdown("### ⏱️ Virtual Clock")
+    st.markdown('<div class="control-label">Virtual Clock</div>', unsafe_allow_html=True)
     col_c1, col_c2 = st.columns(2)
     with col_c1:
         st.caption("Current Time")
-        st.subheader(f"T = {st.session_state.current_time:.1f}")
+        st.markdown(f'<div style="font-size: 1.25rem; font-weight: 600; color: #09090b;">T = {st.session_state.current_time:.1f}</div>', unsafe_allow_html=True)
     with col_c2:
         st.caption("Depot Horizon")
-        st.subheader(f"T = {sim.instance.depot.due_date:.0f}")
+        st.markdown(f'<div style="font-size: 1.25rem; font-weight: 600; color: #71717a;">T = {sim.instance.depot.due_date:.0f}</div>', unsafe_allow_html=True)
 
-    st.markdown("---")
-    st.markdown("### 🚐 Fleet Status")
-    st.write(f"**Total Fleet:** {len(sim.vehicles)} Vans")
-    st.write(f"**Operational:** {len(sim.vehicles) - len(sim.broken_vehicles)} Vans")
-    st.write(f"**Disabled / Broken:** {len(sim.broken_vehicles)} Vans")
-    st.write(f"**Completed Deliveries:** {len(sim.completed_jobs)} / {sim.instance.num_customers}")
+    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 1.25rem 0;"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="control-label">Fleet Status</div>', unsafe_allow_html=True)
 
-    st.markdown("---")
-    if st.button("🔄 Reset Simulation to Baseline", use_container_width=True):
+    st.markdown(
+        f"""
+        <div style="display: flex; flex-direction: column; gap: 0.55rem; font-size: 0.85rem; margin-top: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; color: #71717a;">
+                <span>Total Fleet</span>
+                <span style="color: #09090b; font-weight: 500;">{len(sim.vehicles)} Vans</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; color: #71717a;">
+                <span>Operational</span>
+                <span style="color: #10b981; font-weight: 500;">{len(sim.vehicles) - len(sim.broken_vehicles)} Vans</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; color: #71717a;">
+                <span>Disabled</span>
+                <span style="color: {'#ef4444' if len(sim.broken_vehicles) > 0 else '#a1a1aa'}; font-weight: 500;">{len(sim.broken_vehicles)} Vans</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; color: #71717a;">
+                <span>Completed Deliveries</span>
+                <span style="color: #09090b; font-weight: 500;">{len(sim.completed_jobs)} / {sim.instance.num_customers}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 1.25rem 0;"></div>', unsafe_allow_html=True)
+    if st.button("Reset Simulation", icon=":material/restart_alt:", width="stretch"):
         st.session_state.clear()
         init_simulation_state()
         st.rerun()
 
 
 # ==============================================================================
-# 7. Simulation Controls (Disruption Triggers & Autonomous Loop)
+# 6. Simulation Controls (Disruption Triggers & Autonomous Loop)
 # ==============================================================================
-st.markdown("### ⚡ Live Disruption & Simulation Controls")
+st.markdown('<div class="section-title">Simulation & Disruption Controls</div>', unsafe_allow_html=True)
 col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.6, 1.2, 1.2], gap="medium")
 
 # --- Column 1: Autonomous Loop Controls ---
 with col_ctrl1:
-    st.markdown("**1. Autonomous Simulation**")
+    st.markdown('<div class="control-label">Autonomous Simulation</div>', unsafe_allow_html=True)
+    is_running = st.session_state.get("is_simulating", False)
+    is_completed = sim.is_simulation_completed()
+    play_label = "Resume" if st.session_state.current_time > 0 else "Start"
+
     c_play, c_pause, c_step = st.columns(3)
     with c_play:
-        if st.button("▶️ Start / Resume", use_container_width=True, type="primary"):
+        if st.button(
+            play_label,
+            icon=":material/play_arrow:",
+            width="stretch",
+            type="primary" if not is_running else "secondary",
+            disabled=is_running or is_completed,
+        ):
             st.session_state.is_simulating = True
+            st.rerun()
     with c_pause:
-        if st.button("⏸️ Pause", use_container_width=True):
+        if st.button(
+            "Pause",
+            icon=":material/pause:",
+            width="stretch",
+            type="primary" if is_running else "secondary",
+            disabled=not is_running,
+        ):
             st.session_state.is_simulating = False
+            st.rerun()
     with c_step:
-        if st.button("⏭️ Step (+25)", use_container_width=True):
+        if st.button(
+            "Step (+25s)",
+            icon=":material/skip_next:",
+            width="stretch",
+            disabled=is_running or is_completed,
+        ):
             st.session_state.is_simulating = False
             if not sim.is_simulation_completed():
                 next_t = min(st.session_state.current_time + 25.0, float(sim.instance.depot.due_date))
                 sim.advance_clock(next_t)
                 st.session_state.current_time = next_t
+                st.rerun()
 
 # --- Column 2: Vehicle Breakdown Disruption ---
 with col_ctrl2:
-    st.markdown("**2. Mechanical Disruption**")
+    st.markdown('<div class="control-label">Mechanical Disruption</div>', unsafe_allow_html=True)
     van_1_broken = 1 in sim.broken_vehicles
-    btn_label = "🚨 Van 1 Already Disabled" if van_1_broken else "🚨 Trigger Van 1 Breakdown"
+    btn_label = "Van 1 Inactive" if van_1_broken else "Trigger Breakdown"
 
-    if st.button(btn_label, use_container_width=True, disabled=van_1_broken):
+    if st.button(btn_label, icon=":material/warning:", width="stretch", disabled=van_1_broken):
         st.session_state.is_simulating = False
         res = sim.trigger_breakdown(1)
         if res.get("status") == "already_completed":
@@ -603,12 +825,12 @@ with col_ctrl2:
         else:
             sim.replan(exploration_level=1)
             rt = sim.replanning_history[-1]["runtime_ms"]
-            st.toast(f"🚨 Van 1 breakdown handled! Re-routed in {rt:.2f} ms.", icon="⚠️")
+            st.toast(f"Van 1 breakdown logged. Fleet re-routed in {rt:.2f} ms.")
 
 # --- Column 3: Rush Order Injection ---
 with col_ctrl3:
-    st.markdown("**3. Dynamic Customer Demand**")
-    if st.button("⚡ Inject Rush Orders (x3)", use_container_width=True):
+    st.markdown('<div class="control-label">Dynamic Customer Demand</div>', unsafe_allow_html=True)
+    if st.button("Inject Rush Orders (+3)", icon=":material/bolt:", width="stretch"):
         st.session_state.is_simulating = False
         st.session_state.rush_order_count += 1
         offset = st.session_state.rush_order_count * 10
@@ -648,25 +870,25 @@ with col_ctrl3:
         injected = sim.inject_new_orders(rush_orders)
         sim.replan(exploration_level=1)
         rt = sim.replanning_history[-1]["runtime_ms"]
-        st.toast(f"⚡ Injected {len(injected)} rush stops! Fleet re-routed in {rt:.2f} ms.", icon="🚀")
+        st.toast(f"Injected {len(injected)} rush orders. Fleet re-routed in {rt:.2f} ms.")
 
 
 # ==============================================================================
-# 8. Live Display Placeholders (Dynamic Updates without Page Reload)
+# 7. Live Display Placeholders (Dynamic Updates without Page Reload)
 # ==============================================================================
 kpi_placeholder = st.empty()
 render_kpi_metrics(kpi_placeholder, sim)
 
 map_placeholder = st.empty()
-map_placeholder.plotly_chart(plot_routes(sim), use_container_width=True)
+map_placeholder.plotly_chart(plot_routes(sim), width="stretch")
 
 
 # ==============================================================================
-# 9. Detailed Telemetry & Fleet Manifest Tabs
+# 8. Detailed Telemetry & Fleet Manifest Tabs
 # ==============================================================================
-st.markdown("---")
+st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 1.5rem 0 1rem 0;"></div>', unsafe_allow_html=True)
 tab_routes, tab_telemetry, tab_fleet = st.tabs(
-    ["📋 Live Route Manifests", "📈 Re-planning Telemetry Audit", "🚐 Fleet State Table"]
+    ["Route Manifests", "Telemetry Audit", "Fleet State"]
 )
 
 with tab_routes:
@@ -714,7 +936,7 @@ with tab_routes:
                     "service_time": "Service Duration",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     else:
@@ -734,7 +956,7 @@ with tab_telemetry:
                     "active_vehicles_count": "Available Fleet",
                 }
             ),
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
     else:
@@ -757,28 +979,18 @@ with tab_fleet:
                     "Completed Stops": len(vstate.completed_job_ids),
                 }
             )
-    st.dataframe(pd.DataFrame(fleet_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(fleet_rows), width="stretch", hide_index=True)
 
 
 # ==============================================================================
-# 10. Autonomous Execution Loop (Native Streamlit Animation via st.rerun)
+# 9. Autonomous Execution Loop (Native Streamlit Animation via st.rerun)
 # ==============================================================================
-import time
-
-# Check if the simulation is active and not finished
 if st.session_state.get('is_simulating', False):
     if not st.session_state.sim.is_simulation_completed():
-        # Advance the clock smoothly
         st.session_state.current_time += 10.0
         st.session_state.sim.advance_clock(st.session_state.current_time)
-        
-        # Pace the animation so the user can see the vans moving
-        time.sleep(0.15) 
-        
-        # Force Streamlit to rerun the script from top to bottom, updating the map and KPIs
+        time.sleep(0.15)
         st.rerun()
     else:
-        # Auto-stop when deliveries are done
         st.session_state.is_simulating = False
         st.rerun()
-
