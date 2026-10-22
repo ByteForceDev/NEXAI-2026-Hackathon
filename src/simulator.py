@@ -564,8 +564,9 @@ class SimulationState:
         vroom_mat = to_vroom_matrix(self.distance_matrix)
         problem.set_durations_matrix(profile=profile, matrix_input=vroom_mat)
 
-        # 2. Add active operational vehicles
-        depot_due_date = int(self.instance.depot.scaled_due_date)
+        # 2. Add active operational vehicles with dynamically extended horizon for indefinite simulation
+        horizon_buffer = scale_value(3000.0, self.scale_factor)
+        max_horizon = max(int(self.instance.depot.scaled_due_date), self.current_time + horizon_buffer)
         active_vehicles: List[vroom.Vehicle] = []
 
         for v_id, v_state in self.vehicles.items():
@@ -573,17 +574,18 @@ class SimulationState:
             if v_id in self.broken_vehicles or v_state.is_broken:
                 continue
 
-            # Skip vehicles that have completely exhausted their capacity
-            if v_state.remaining_capacity <= 0:
+            # If vehicle has returned to depot, reload to full capacity for new dispatches
+            if v_state.is_returned_to_depot or v_state.start_location == 0:
+                v_state.remaining_capacity = int(self.instance.vehicle_capacity)
+
+            rem_capacity = v_state.remaining_capacity
+            if rem_capacity <= 0:
                 continue
 
             start_loc = v_state.start_location
             time_window_start = v_state.available_from
-            rem_capacity = v_state.remaining_capacity
 
-            # Ensure valid non-inverted time window
-            if time_window_start >= depot_due_date:
-                continue
+            veh_end = max(max_horizon, time_window_start + scale_value(1200.0, self.scale_factor))
 
             veh = vroom.Vehicle(
                 id=v_id,
@@ -591,7 +593,7 @@ class SimulationState:
                 end=0,  # Vehicles canonically return to the central depot
                 profile=profile,
                 capacity=[rem_capacity],
-                time_window=vroom.TimeWindow(start=time_window_start, end=depot_due_date),
+                time_window=vroom.TimeWindow(start=time_window_start, end=veh_end),
             )
             active_vehicles.append(veh)
 

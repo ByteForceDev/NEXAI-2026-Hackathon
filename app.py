@@ -8,12 +8,14 @@ Light Mode Shadcn UI design with high-contrast monochrome palette, subtle accent
 """
 
 from typing import Any, Dict, List, Optional, Tuple
+import json
 import time
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.parser import parse_solomon_instance
 from src.simulator import SimulationState
@@ -498,16 +500,52 @@ ROUTE_COLORS = [
 ]
 
 
+def _compute_map_bounds(sim_state: SimulationState) -> Tuple[List[float], List[float]]:
+    """
+    Compute static, stable dynamic axis ranges [min, max] so the map fully fits the viewport
+    without any jitter, edge cutoffs, or excessive whitespace.
+    """
+    all_x: List[float] = [float(sim_state.instance.depot.x)]
+    all_y: List[float] = [float(sim_state.instance.depot.y)]
+
+    # Customer nodes
+    for c in sim_state.instance.customers:
+        all_x.append(float(c.x))
+        all_y.append(float(c.y))
+
+    # Dynamic rush order nodes
+    for cid, cdata in sim_state.customer_lookup.items():
+        if cid >= 100:
+            all_x.append(float(cdata.x))
+            all_y.append(float(cdata.y))
+
+    if not all_x:
+        return [10.0, 50.0], [45.0, 92.0]
+
+    x_min, x_max = min(all_x), max(all_x)
+    y_min, y_max = min(all_y), max(all_y)
+
+    x_span = max(x_max - x_min, 10.0)
+    y_span = max(y_max - y_min, 10.0)
+
+    # 7% horizontal margin gives breathing room on edges
+    pad_x = x_span * 0.07
+
+    # 7% bottom margin (depot label room) and 14% top margin (room for high stops like #5, #19 and route arcs)
+    pad_y_bottom = y_span * 0.07
+    pad_y_top = y_span * 0.14
+
+    return [round(x_min - pad_x, 1), round(x_max + pad_x, 1)], [round(y_min - pad_y_bottom, 1), round(y_max + pad_y_top, 1)]
+
+
 def plot_routes(sim_state: SimulationState) -> go.Figure:
     """
-    Generate an interactive 2D spatial dispatch map with active routes and dynamic nodes.
-    Minimalist light mode aesthetic with high-contrast routes and subtle grid.
+    Generate an interactive 2D spatial dispatch map with continuous animated kinematics.
+    Fixed trace order, stable UIDs, and point IDs guarantee butter-smooth client-side transitions.
     """
     fig = go.Figure()
+    depot = sim_state.instance.depot
 
-    # --------------------------------------------------------------------------
-    # A. Draw Vehicle Routes (Edges)
-    # --------------------------------------------------------------------------
     solution = sim_state.current_solution
     routes_df = (
         solution.routes
@@ -515,13 +553,56 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         else pd.DataFrame()
     )
 
+    grouped_routes = {}
     if not routes_df.empty:
-        for idx, (v_id, group) in enumerate(routes_df.groupby("vehicle_id")):
-            color = ROUTE_COLORS[idx % len(ROUTE_COLORS)]
-            xs: List[float] = []
-            ys: List[float] = []
-            hover_lines: List[str] = []
+        for vid, grp in routes_df.groupby("vehicle_id"):
+            grouped_routes[int(vid)] = grp
 
+    active_vids = set(grouped_routes.keys())
+    active_vids.update(sim_state.broken_vehicles)
+    max_active_id = max([5] + list(active_vids))
+    total_fleet_count = min(len(sim_state.vehicles), max_active_id + 1)
+
+    # --------------------------------------------------------------------------
+    # 1. Central Depot (Fixed Trace 0, uid="depot_fixed")
+    # --------------------------------------------------------------------------
+    fig.add_trace(
+        go.Scatter(
+            x=[depot.x],
+            y=[depot.y],
+            mode="markers+text",
+            marker=dict(
+                symbol="square",
+                size=16,
+                color="#09090b",
+                line=dict(color="#ffffff", width=2.0),
+            ),
+            text=["DEPOT"],
+            textposition="bottom center",
+            textfont=dict(size=10, color="#09090b", family="Poppins, sans-serif"),
+            name="Central Depot",
+            uid="depot_fixed",
+            hoverinfo="text",
+            hovertext=[
+                f"<b>CENTRAL DEPOT (Node 0)</b><br>"
+                f"Coordinates: ({depot.x:.1f}, {depot.y:.1f})<br>"
+                f"Operational Horizon: [{depot.ready_time}, {depot.due_date}]<br>"
+                f"Fleet Base: {sim_state.instance.vehicle_count} Vehicles"
+            ],
+        )
+    )
+
+    # --------------------------------------------------------------------------
+    # 2. Vehicle Route Edges (Fixed Traces 1..N, uid="route_line_v_id")
+    # --------------------------------------------------------------------------
+    for v_id in range(1, total_fleet_count + 1):
+        color = ROUTE_COLORS[(v_id - 1) % len(ROUTE_COLORS)]
+        group = grouped_routes.get(v_id)
+        xs: List[float] = []
+        ys: List[float] = []
+        hover_lines: List[str] = []
+
+        if group is not None and not group.empty:
             for step_num, (_, step) in enumerate(group.iterrows()):
                 loc_idx = int(step["location_index"])
                 x, y = get_node_coords(sim_state, loc_idx)
@@ -543,28 +624,31 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                     hover_text += f"<br>Job ID: #{int(job_id)}"
                 hover_lines.append(hover_text)
 
-            fig.add_trace(
-                go.Scatter(
-                    x=xs,
-                    y=ys,
-                    mode="lines",
-                    line=dict(color=color, width=2.4),
-                    opacity=0.88,
-                    name=f"Van {v_id}",
-                    hoverinfo="text",
-                    hovertext=hover_lines,
-                )
+        fig.add_trace(
+            go.Scatter(
+                x=xs,
+                y=ys,
+                mode="lines",
+                line=dict(color=color, width=2.4),
+                opacity=0.82,
+                name=f"Route Van {v_id}",
+                uid=f"route_line_{v_id}",
+                hoverinfo="text",
+                hovertext=hover_lines,
+                showlegend=True if xs else False,
             )
+        )
 
     # --------------------------------------------------------------------------
-    # B. Plot Completed Nodes
+    # 3. Completed Customer Nodes (Fixed Trace, uid="comp_nodes_fixed")
     # --------------------------------------------------------------------------
-    comp_x, comp_y, comp_hover = [], [], []
+    comp_x, comp_y, comp_hover, comp_labels = [], [], [], []
     for c_id, info in sim_state.completed_jobs.items():
         loc = info.get("location_index", 0)
         x, y = get_node_coords(sim_state, loc)
         comp_x.append(x)
         comp_y.append(y)
+        comp_labels.append(f"#{c_id}")
         comp_hover.append(
             f"<b>Customer #{c_id} [Delivered]</b><br>"
             f"Location: ({x:.1f}, {y:.1f})<br>"
@@ -573,29 +657,29 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
             f"Finished at T={unscale_value(info.get('completion_time', 0), sim_state.scale_factor):.1f}"
         )
 
-    if comp_x:
-        fig.add_trace(
-            go.Scatter(
-                x=comp_x,
-                y=comp_y,
-                mode="markers+text",
-                marker=dict(
-                    symbol="circle",
-                    size=9,
-                    color="#e2e8f0",
-                    line=dict(color="#94a3b8", width=1.2),
-                ),
-                text=[f"#{cid}" for cid in sim_state.completed_jobs.keys()],
-                textposition="bottom center",
-                textfont=dict(size=8, color="#64748b", family="Poppins, sans-serif"),
-                name=f"Completed ({len(comp_x)})",
-                hoverinfo="text",
-                hovertext=comp_hover,
-            )
+    fig.add_trace(
+        go.Scatter(
+            x=comp_x,
+            y=comp_y,
+            mode="markers+text",
+            marker=dict(
+                symbol="circle",
+                size=9,
+                color="#e2e8f0",
+                line=dict(color="#94a3b8", width=1.2),
+            ),
+            text=comp_labels,
+            textposition="bottom center",
+            textfont=dict(size=8, color="#64748b", family="Poppins, sans-serif"),
+            name="Completed Orders",
+            uid="comp_nodes_fixed",
+            hoverinfo="text",
+            hovertext=comp_hover,
         )
+    )
 
     # --------------------------------------------------------------------------
-    # C. Plot Pending Regular Customers & Rush Orders
+    # 4. Pending Regular Orders (Fixed Trace, uid="pend_nodes_fixed")
     # --------------------------------------------------------------------------
     pend_x, pend_y, pend_hover, pend_labels = [], [], [], []
     rush_x, rush_y, rush_hover, rush_labels = [], [], [], []
@@ -628,160 +712,132 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
             pend_hover.append(hover_info)
             pend_labels.append(f"#{job_id}")
 
-    if pend_x:
-        fig.add_trace(
-            go.Scatter(
-                x=pend_x,
-                y=pend_y,
-                mode="markers+text",
-                marker=dict(
-                    symbol="circle",
-                    size=9,
-                    color="#ffffff",
-                    line=dict(color="#09090b", width=1.5),
-                ),
-                text=pend_labels,
-                textposition="top center",
-                textfont=dict(size=8, color="#475569", family="Poppins, sans-serif"),
-                name=f"Pending Orders ({len(pend_x)})",
-                hoverinfo="text",
-                hovertext=pend_hover,
-            )
-        )
-
-    if rush_x:
-        fig.add_trace(
-            go.Scatter(
-                x=rush_x,
-                y=rush_y,
-                mode="markers+text",
-                marker=dict(
-                    symbol="diamond",
-                    size=13,
-                    color="#f59e0b",
-                    line=dict(color="#09090b", width=1.5),
-                ),
-                text=rush_labels,
-                textposition="top right",
-                textfont=dict(size=9, color="#b45309", family="Poppins, sans-serif"),
-                name=f"Rush Orders ({len(rush_x)})",
-                hoverinfo="text",
-                hovertext=rush_hover,
-            )
-        )
-
-    # --------------------------------------------------------------------------
-    # D. Plot Interpolated Vehicle Positions (Smooth Kinematics)
-    # --------------------------------------------------------------------------
-    veh_positions = sim_state.get_interpolated_vehicle_positions()
-    van_x, van_y, van_hover, van_labels = [], [], [], []
-    broken_x, broken_y, broken_hover, broken_labels = [], [], [], []
-
-    for v_id, p_info in veh_positions.items():
-        if p_info["is_broken"]:
-            broken_x.append(p_info["x"])
-            broken_y.append(p_info["y"])
-            broken_labels.append(f"Van {v_id} [Offline]")
-            broken_hover.append(
-                f"<b>Van #{v_id} [Disabled / Breakdown]</b><br>"
-                f"Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
-                f"Status: {p_info['status']}<br>"
-                f"<i>Pending deliveries reassigned to active fleet.</i>"
-            )
-        elif p_info["is_active"]:
-            van_x.append(p_info["x"])
-            van_y.append(p_info["y"])
-            van_labels.append(f"Van {v_id}")
-            van_hover.append(
-                f"<b>Van #{v_id} [Active]</b><br>"
-                f"Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
-                f"Status: {p_info['status']}<br>"
-                f"Remaining Capacity: {sim_state.vehicles[v_id].remaining_capacity} units<br>"
-                f"Completed Stops: {len(sim_state.vehicles[v_id].completed_job_ids)}"
-            )
-
-    if van_x:
-        fig.add_trace(
-            go.Scatter(
-                x=van_x,
-                y=van_y,
-                mode="markers+text",
-                marker=dict(
-                    symbol="triangle-up",
-                    size=14,
-                    color="#09090b",
-                    line=dict(color="#ffffff", width=2.0),
-                ),
-                text=van_labels,
-                textposition="bottom right",
-                textfont=dict(size=9, color="#09090b", family="Poppins, sans-serif"),
-                name="Active Fleet",
-                hoverinfo="text",
-                hovertext=van_hover,
-            )
-        )
-
-    if broken_x:
-        fig.add_trace(
-            go.Scatter(
-                x=broken_x,
-                y=broken_y,
-                mode="markers+text",
-                marker=dict(
-                    symbol="x",
-                    size=16,
-                    color="#ef4444",
-                    line=dict(color="#ffffff", width=2.0),
-                ),
-                text=broken_labels,
-                textposition="top center",
-                textfont=dict(size=9, color="#dc2626", family="Poppins, sans-serif"),
-                name="Disabled Vehicle",
-                hoverinfo="text",
-                hovertext=broken_hover,
-            )
-        )
-
-    # --------------------------------------------------------------------------
-    # E. Plot Central Depot
-    # --------------------------------------------------------------------------
-    depot = sim_state.instance.depot
     fig.add_trace(
         go.Scatter(
-            x=[depot.x],
-            y=[depot.y],
+            x=pend_x,
+            y=pend_y,
             mode="markers+text",
             marker=dict(
-                symbol="square",
-                size=16,
-                color="#09090b",
-                line=dict(color="#ffffff", width=2.0),
+                symbol="circle",
+                size=9,
+                color="#ffffff",
+                line=dict(color="#09090b", width=1.5),
             ),
-            text=["DEPOT (0)"],
-            textposition="bottom center",
-            textfont=dict(size=10, color="#09090b", family="Poppins, sans-serif"),
-            name="Central Depot",
+            text=pend_labels,
+            textposition="top center",
+            textfont=dict(size=8, color="#475569", family="Poppins, sans-serif"),
+            name="Pending Orders",
+            uid="pend_nodes_fixed",
             hoverinfo="text",
-            hovertext=[
-                f"<b>CENTRAL DEPOT (Node 0)</b><br>"
-                f"Coordinates: ({depot.x:.1f}, {depot.y:.1f})<br>"
-                f"Operational Horizon: [{depot.ready_time}, {depot.due_date}]<br>"
-                f"Fleet Base: {sim_state.instance.vehicle_count} Vehicles"
-            ],
+            hovertext=pend_hover,
         )
     )
 
-    # Layout styling: clean light minimalist theme with Poppins font and smooth transitions
+    # --------------------------------------------------------------------------
+    # 5. Rush Orders (Fixed Trace, uid="rush_nodes_fixed")
+    # --------------------------------------------------------------------------
+    fig.add_trace(
+        go.Scatter(
+            x=rush_x,
+            y=rush_y,
+            mode="markers+text",
+            marker=dict(
+                symbol="diamond",
+                size=13,
+                color="#f59e0b",
+                line=dict(color="#09090b", width=1.5),
+            ),
+            text=rush_labels,
+            textposition="top right",
+            textfont=dict(size=9, color="#b45309", family="Poppins, sans-serif"),
+            name="Rush Orders",
+            uid="rush_nodes_fixed",
+            hoverinfo="text",
+            hovertext=rush_hover,
+        )
+    )
+
+    # --------------------------------------------------------------------------
+    # 6. Smooth Animated Vehicle Positions (INDIVIDUAL Fixed Traces per Vehicle)
+    # --------------------------------------------------------------------------
+    veh_positions = sim_state.get_interpolated_vehicle_positions()
+
+    for v_id in range(1, total_fleet_count + 1):
+        p_info = veh_positions.get(v_id, {
+            "x": depot.x,
+            "y": depot.y,
+            "is_broken": False,
+            "is_active": False,
+            "status": "At Depot",
+        })
+        is_broken = p_info.get("is_broken", False)
+        is_active = p_info.get("is_active", False)
+        base_color = ROUTE_COLORS[(v_id - 1) % len(ROUTE_COLORS)]
+        van_color = "#ef4444" if is_broken else base_color
+        symbol = "x" if is_broken else "triangle-up"
+        size = 17 if is_broken else 14
+        status_str = "OFFLINE" if is_broken else p_info.get("status", "Active")
+
+        # Hide idle reserve fleet markers from piling on top of the Depot icon
+        is_idle_at_depot = (
+            abs(p_info["x"] - depot.x) < 0.1
+            and abs(p_info["y"] - depot.y) < 0.1
+            and not is_active
+            and not is_broken
+        )
+        van_text = None if is_idle_at_depot else ([f"Van {v_id} [OFF]" if is_broken else f"Van {v_id}"])
+
+        fig.add_trace(
+            go.Scatter(
+                x=[p_info["x"]],
+                y=[p_info["y"]],
+                ids=[f"van_{v_id}"],
+                mode="markers+text" if van_text else "markers",
+                marker=dict(
+                    symbol=symbol,
+                    size=0 if is_idle_at_depot else size,
+                    color=van_color,
+                    line=dict(color="#ffffff", width=2.0),
+                    opacity=0.0 if is_idle_at_depot else 1.0,
+                ),
+                text=van_text,
+                textposition="top center" if is_broken else "bottom right",
+                textfont=dict(size=9, color=van_color, family="Poppins, sans-serif"),
+                name=f"Van {v_id}",
+                uid=f"van_marker_{v_id}",
+                hoverinfo="text" if not is_idle_at_depot else "none",
+                hovertext=[
+                    f"<b>Van #{v_id} [{'Disabled' if is_broken else 'Active'}]</b><br>"
+                    f"Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
+                    f"Status: {status_str}<br>"
+                    f"Remaining Capacity: {sim_state.vehicles[v_id].remaining_capacity} units"
+                ] if not is_idle_at_depot else None,
+                showlegend=False,
+            )
+        )
+
+    # --------------------------------------------------------------------------
+    # 7. Fixed Viewport Layout with Continuous Interpolated Transitions
+    # --------------------------------------------------------------------------
+    # Compute dynamic axis bounds from all visible coordinates
+    x_range, y_range = _compute_map_bounds(sim_state)
+
     fig.update_layout(
-        uirevision="dispatch_map",
-        transition=dict(duration=350, easing="cubic-in-out"),
+        uirevision="continuous_dispatch_view",
+        transition=dict(
+            duration=230,
+            easing="cubic-in-out",
+            ordering="traces first",
+        ),
         template="plotly_white",
         paper_bgcolor="#ffffff",
         plot_bgcolor="#fcfcfd",
-        margin=dict(l=20, r=20, t=30, b=20),
+        margin=dict(l=25, r=25, t=35, b=25),
         font=dict(family="Poppins, sans-serif", color="#64748b", size=10),
         xaxis=dict(
             title=dict(text="X Coordinate", font=dict(family="Poppins, sans-serif", size=11, color="#64748b")),
+            range=x_range,
+            autorange=False,
             gridcolor="#f1f5f9",
             zerolinecolor="#e2e8f0",
             tickfont=dict(family="Poppins, sans-serif", color="#64748b", size=9),
@@ -789,12 +845,12 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
         ),
         yaxis=dict(
             title=dict(text="Y Coordinate", font=dict(family="Poppins, sans-serif", size=11, color="#64748b")),
+            range=y_range,
+            autorange=False,
             gridcolor="#f1f5f9",
             zerolinecolor="#e2e8f0",
             tickfont=dict(family="Poppins, sans-serif", color="#64748b", size=9),
             showgrid=True,
-            scaleanchor="x",
-            scaleratio=1,
         ),
         legend=dict(
             orientation="h",
@@ -814,7 +870,7 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
             font_family="Poppins, sans-serif",
             font_color="#09090b",
         ),
-        height=530,
+        height=540,
     )
 
     return fig
@@ -964,7 +1020,6 @@ col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.6, 1.2, 1.2], gap="medium")
 with col_ctrl1:
     st.markdown('<div class="control-label">Autonomous Simulation</div>', unsafe_allow_html=True)
     is_running = st.session_state.get("is_simulating", False)
-    is_completed = sim.is_simulation_completed()
     play_label = "Resume" if st.session_state.current_time > 0 else "Start"
 
     c_play, c_pause, c_step = st.columns(3)
@@ -975,7 +1030,7 @@ with col_ctrl1:
             icon=":material/play_arrow:",
             width="stretch",
             type="primary" if not is_running else "secondary",
-            disabled=is_running or is_completed,
+            disabled=is_running,
             key="btn_play",
         ):
             st.session_state.is_simulating = True
@@ -998,32 +1053,31 @@ with col_ctrl1:
             "Step (+25s)",
             icon=":material/skip_next:",
             width="stretch",
-            disabled=is_running or is_completed,
             key="btn_step",
         ):
-            st.session_state.is_simulating = False
-            if not sim.is_simulation_completed():
-                next_t = min(st.session_state.current_time + 25.0, float(sim.instance.depot.due_date))
-                sim.advance_clock(next_t)
-                st.session_state.current_time = next_t
-                st.rerun()
+            st.session_state.current_time += 25.0
+            sim.advance_clock(st.session_state.current_time)
+            st.rerun()
 
 # --- Column 2: Vehicle Breakdown Disruption ---
 with col_ctrl2:
     st.markdown('<div class="control-label">Mechanical Disruption</div>', unsafe_allow_html=True)
-    van_1_broken = 1 in sim.broken_vehicles
-    btn_label = "Van 1 Inactive" if van_1_broken else "Trigger Breakdown"
+    active_broken = sim.broken_vehicles
+    candidate_vans = [vid for vid in sim.vehicles if vid not in active_broken]
+    target_van = min(candidate_vans) if candidate_vans else None
+    van_disabled = target_van is None
+    btn_label = f"Breakdown (Van {target_van})" if target_van else "All Vans Inactive"
     st.markdown('<div class="btn-ctrl-breakdown"></div>', unsafe_allow_html=True)
 
-    if st.button(btn_label, icon=":material/warning:", width="stretch", disabled=van_1_broken, key="btn_breakdown"):
-        st.session_state.is_simulating = False
-        res = sim.trigger_breakdown(1)
+    if st.button(btn_label, icon=":material/warning:", width="stretch", disabled=van_disabled, key="btn_breakdown"):
+        # Real-time: Keep simulation running without halting!
+        res = sim.trigger_breakdown(target_van)
         if res.get("status") == "already_completed":
-            st.info(res.get("message"))
+            st.toast(res.get("message"), icon=":material/info:")
         else:
             sim.replan(exploration_level=1)
             rt = sim.replanning_history[-1]["runtime_ms"]
-            st.toast(f"Van 1 breakdown logged. Fleet re-routed in {rt:.2f} ms.")
+            st.toast(f"Van {target_van} breakdown logged. Fleet re-routed in {rt:.2f} ms.", icon=":material/warning:")
         st.rerun()
 
 # --- Column 3: Rush Order Injection ---
@@ -1031,45 +1085,39 @@ with col_ctrl3:
     st.markdown('<div class="control-label">Dynamic Customer Demand</div>', unsafe_allow_html=True)
     st.markdown('<div class="btn-ctrl-rush"></div>', unsafe_allow_html=True)
     if st.button("Inject Rush Orders (+3)", icon=":material/bolt:", width="stretch", key="btn_rush"):
-        st.session_state.is_simulating = False
-        depot_due = float(sim.instance.depot.due_date)
-        cur_t = float(st.session_state.current_time)
-
-        if sim.is_simulation_completed() or cur_t >= depot_due - 30.0:
-            st.toast("Cannot inject rush orders: simulation horizon is complete.", icon=":material/warning:")
-            st.rerun()
-
+        # Real-time: Keep simulation running without halting!
         st.session_state.rush_order_count += 1
         offset = st.session_state.rush_order_count * 10
+        cur_t = float(st.session_state.current_time)
         serv = 90.0
 
-        # Dynamically compute valid forward time windows ensuring ready_time <= due_date
+        # Realistic rush orders across the operational map with generous forward delivery windows
         rush_orders = [
             {
                 "cust_no": 100 + offset + 1,
-                "x": 38.0,
-                "y": 55.0,
+                "x": 38.0 + ((offset * 7) % 35) - 15,
+                "y": 55.0 + ((offset * 11) % 30) - 15,
                 "demand": 15,
                 "ready_time": cur_t,
-                "due_date": max(cur_t + serv + 120.0, min(cur_t + 400.0, depot_due)),
+                "due_date": cur_t + serv + 450.0,
                 "service_time": serv,
             },
             {
                 "cust_no": 100 + offset + 2,
-                "x": 28.0,
-                "y": 70.0,
+                "x": 28.0 + ((offset * 5) % 40) - 15,
+                "y": 70.0 - ((offset * 9) % 35) + 10,
                 "demand": 20,
                 "ready_time": cur_t,
-                "due_date": max(cur_t + serv + 150.0, min(cur_t + 450.0, depot_due)),
+                "due_date": cur_t + serv + 500.0,
                 "service_time": serv,
             },
             {
                 "cust_no": 100 + offset + 3,
-                "x": 48.0,
-                "y": 45.0,
+                "x": 48.0 - ((offset * 13) % 30) + 15,
+                "y": 45.0 + ((offset * 7) % 25) - 10,
                 "demand": 10,
                 "ready_time": cur_t,
-                "due_date": max(cur_t + serv + 180.0, min(cur_t + 500.0, depot_due)),
+                "due_date": cur_t + serv + 550.0,
                 "service_time": serv,
             },
         ]
@@ -1078,7 +1126,7 @@ with col_ctrl3:
             injected = sim.inject_new_orders(rush_orders)
             sim.replan(exploration_level=1)
             rt = sim.replanning_history[-1]["runtime_ms"]
-            st.toast(f"Injected {len(injected)} rush orders. Fleet re-routed in {rt:.2f} ms.")
+            st.toast(f"Injected {len(injected)} rush orders. Fleet re-routed in {rt:.2f} ms.", icon=":material/bolt:")
         except Exception as e:
             st.error(f"Failed to schedule rush orders: {e}")
         st.rerun()
@@ -1087,40 +1135,35 @@ with col_ctrl3:
 # ==============================================================================
 # 7. Live Display Fragment (Smooth In-Place Updates Without Page Reload)
 # ==============================================================================
-# Dynamic fragment interval: 0.4s when actively simulating, None when paused/idle
-sim_interval = 0.4 if st.session_state.get("is_simulating", False) else None
+# Dynamic fragment interval: 0.25s when actively simulating, None when paused/idle
+sim_interval = 0.25 if st.session_state.get("is_simulating", False) else None
 
 @st.fragment(run_every=sim_interval)
 def render_live_simulation_board():
     sim_state: SimulationState = st.session_state.sim
 
-    # Autonomous clock step when simulating (updates state smoothly in-place)
+    # Autonomous clock step when simulating (runs indefinitely in continuous logistics mode)
     if st.session_state.get("is_simulating", False):
-        if not sim_state.is_simulation_completed():
-            st.session_state.current_time = min(
-                st.session_state.current_time + 10.0,
-                float(sim_state.instance.depot.due_date),
-            )
-            sim_state.advance_clock(st.session_state.current_time)
-            if sim_state.is_simulation_completed():
-                st.session_state.is_simulating = False
-                st.rerun()
-        else:
-            st.session_state.is_simulating = False
-            st.rerun()
+        # Fine-grained micro-step: 2.0s per tick gives fluid smooth gliding
+        st.session_state.current_time += 2.0
+        sim_state.advance_clock(st.session_state.current_time)
 
     # --- A. Live Status & Progress Bar ---
     depot_due = float(sim_state.instance.depot.due_date)
     pct = min(100.0, (st.session_state.current_time / depot_due) * 100.0) if depot_due > 0 else 0.0
     is_sim = st.session_state.get("is_simulating", False)
-    is_done = sim_state.is_simulation_completed()
+    all_current_done = sim_state.is_simulation_completed()
 
-    if is_done:
-        status_tag = '<span class="nexai-tag tag-blue"><span class="material-symbols-rounded" style="font-size: 13px;">check_circle</span> SIMULATION COMPLETE</span>'
+    if is_sim and all_current_done:
+        status_tag = '<span class="nexai-tag tag-emerald"><span class="pulse-dot"></span> LIVE (FLEET AT DEPOT / READY)</span>'
     elif is_sim:
         status_tag = '<span class="nexai-tag tag-emerald"><span class="pulse-dot"></span> LIVE SIMULATION</span>'
+    elif all_current_done:
+        status_tag = '<span class="nexai-tag tag-blue"><span class="material-symbols-rounded" style="font-size: 13px;">check_circle</span> READY FOR DISPATCH</span>'
     else:
         status_tag = '<span class="nexai-tag tag-amber"><span class="pulse-dot-amber"></span> PAUSED</span>'
+
+    time_horizon_str = f"(Continuous / Shift 2)" if st.session_state.current_time > depot_due else f"/ {depot_due:.0f}s ({pct:.1f}%)"
 
     st.markdown(
         f"""
@@ -1131,11 +1174,11 @@ def render_live_simulation_board():
                     {status_tag}
                 </div>
                 <div style="font-size: 0.88rem; font-weight: 600; color: #09090b;">
-                    T = <span style="font-size: 1.1rem; color: #2563eb; font-weight: 700;">{st.session_state.current_time:.1f}</span> / {depot_due:.0f}s ({pct:.1f}%)
+                    T = <span style="font-size: 1.1rem; color: #2563eb; font-weight: 700;">{st.session_state.current_time:.1f}s</span> {time_horizon_str}
                 </div>
             </div>
             <div style="height: 6px; width: 100%; background: #f1f5f9; border-radius: 9999px; overflow: hidden;">
-                <div style="height: 100%; width: {pct}%; background: linear-gradient(90deg, #10b981 0%, #3b82f6 100%); transition: width 0.35s ease; border-radius: 9999px;"></div>
+                <div style="height: 100%; width: {min(100.0, pct)}%; background: linear-gradient(90deg, #10b981 0%, #3b82f6 100%); transition: width 0.25s linear; border-radius: 9999px;"></div>
             </div>
         </div>
         """,
@@ -1185,9 +1228,9 @@ def render_live_simulation_board():
         delta_color="off",
     )
 
-    # --- C. Interactive Plotly Map with Smooth Kinematics ---
+    # --- C. Interactive Plotly Map with Continuous Kinematics ---
     fig = plot_routes(sim_state)
-    st.plotly_chart(fig, width="stretch", key="dispatch_map")
+    st.plotly_chart(fig, width="stretch", theme=None, key="dispatch_map", config={"displayModeBar": False, "responsive": True})
 
 # Invoke the live simulation fragment
 render_live_simulation_board()
