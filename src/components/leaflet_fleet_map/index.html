@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -42,7 +43,8 @@
       padding: 0;
     }
 
-    html, body {
+    html,
+    body {
       width: 100%;
       height: 100%;
       overflow: hidden;
@@ -198,6 +200,7 @@
       from {
         box-shadow: 0 0 6px #39ff14, 0 0 12px rgba(57, 255, 20, 0.6);
       }
+
       to {
         box-shadow: 0 0 12px #39ff14, 0 0 24px rgba(57, 255, 20, 0.95);
       }
@@ -225,6 +228,7 @@
       from {
         box-shadow: 0 0 6px #00f0ff, 0 0 12px rgba(0, 240, 255, 0.6);
       }
+
       to {
         box-shadow: 0 0 12px #00f0ff, 0 0 24px rgba(0, 240, 255, 0.95);
       }
@@ -266,7 +270,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
       cursor: pointer;
       transition: all 0.15s ease;
       outline: none;
@@ -317,7 +321,7 @@
       padding: 1px 5px;
       border-radius: 3px;
       white-space: nowrap;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
     }
 
     .vehicle-marker-broken .vehicle-marker-body {
@@ -327,9 +331,17 @@
     }
 
     @keyframes pulse-broken {
-      0% { transform: scale(1); }
-      50% { transform: scale(1.12); }
-      100% { transform: scale(1); }
+      0% {
+        transform: scale(1);
+      }
+
+      50% {
+        transform: scale(1.12);
+      }
+
+      100% {
+        transform: scale(1);
+      }
     }
 
     /* =========================================================================
@@ -405,8 +417,15 @@
     }
 
     @keyframes fsSlideUp {
-      from { transform: translate(-50%, 25px); opacity: 0; }
-      to { transform: translate(-50%, 0); opacity: 1; }
+      from {
+        transform: translate(-50%, 25px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translate(-50%, 0);
+        opacity: 1;
+      }
     }
 
     .fs-bar-section {
@@ -487,6 +506,7 @@
       background: #10b981;
       color: #ffffff;
     }
+
     .fs-btn-resume:hover {
       background: #059669;
     }
@@ -495,6 +515,7 @@
       background: #f59e0b;
       color: #ffffff;
     }
+
     .fs-btn-pause:hover {
       background: #d97706;
     }
@@ -536,6 +557,7 @@
       padding: 5px 10px;
       border-radius: 4px;
     }
+
     .fs-btn-breakdown:hover {
       background: #dc2626;
     }
@@ -544,6 +566,7 @@
       background: #3b82f6;
       color: #ffffff;
     }
+
     .fs-btn-rush:hover {
       background: #2563eb;
     }
@@ -553,6 +576,7 @@
       color: #71717a;
       border: 1px solid #e4e4e7;
     }
+
     .fs-btn-ghost:hover {
       background: #f4f4f5;
       color: #09090b;
@@ -562,6 +586,7 @@
       border-color: #27272a;
       color: #a1a1aa;
     }
+
     [data-theme="dark"] .fs-btn-ghost:hover {
       background: #27272a;
       color: #f4f4f5;
@@ -599,8 +624,15 @@
     }
 
     @keyframes fsSlideLeft {
-      from { transform: translateX(20px); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
+      from {
+        transform: translateX(20px);
+        opacity: 0;
+      }
+
+      to {
+        transform: translateX(0);
+        opacity: 1;
+      }
     }
 
     .fs-panel-header {
@@ -780,7 +812,8 @@
       color: #64748b;
     }
 
-    .fs-col-stop, .fs-col-cap {
+    .fs-col-stop,
+    .fs-col-cap {
       font-variant-numeric: tabular-nums;
       color: #475569;
     }
@@ -791,17 +824,20 @@
     }
   </style>
 </head>
+
 <body>
   <div id="map-wrapper">
     <div id="map"></div>
 
     <!-- Fullscreen Toggle Button -->
     <button id="btn-fullscreen" class="map-action-btn" title="Toggle Fullscreen" onclick="toggleMapFullscreen()">
-      <svg id="fs-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+      <svg id="fs-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
       </svg>
-      <svg id="fs-collapse-icon" style="display:none;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+      <svg id="fs-collapse-icon" style="display:none;" width="16" height="16" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3" />
       </svg>
     </button>
 
@@ -816,18 +852,24 @@
       </div>
       <div id="legend-vehicles" style="display: flex; flex-direction: column; gap: 4px;"></div>
       <div class="legend-row">
-        <div class="legend-indicator" style="background: #00f0ff; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #00f0ff;"></div>
+        <div class="legend-indicator"
+          style="background: #00f0ff; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #00f0ff;">
+        </div>
         <span style="font-weight: 600;">Unvisited Orders (Neon Blue)</span>
       </div>
       <div class="legend-row">
-        <div class="legend-indicator" style="background: #39ff14; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #39ff14;"></div>
+        <div class="legend-indicator"
+          style="background: #39ff14; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #39ff14;">
+        </div>
         <span style="font-weight: 600;">Visited Orders (Neon Green)</span>
       </div>
       <div class="legend-row">
-        <div class="legend-indicator" style="background: #f59e0b; border: 1px solid #09090b; transform: rotate(45deg);"></div>
+        <div class="legend-indicator" style="background: #f59e0b; border: 1px solid #09090b; transform: rotate(45deg);">
+        </div>
         <span>Rush Demand (Mid-day)</span>
       </div>
-      <div id="legend-geo-info" style="font-size: 8.5px; color: #71717a; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 2px;">
+      <div id="legend-geo-info"
+        style="font-size: 8.5px; color: #71717a; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 2px;">
         Active Logistics Hub (Road Grid)
       </div>
     </div>
@@ -840,7 +882,8 @@
       </div>
       <div class="fs-bar-divider"></div>
       <div class="fs-bar-section fs-bar-controls">
-        <button id="fs-btn-toggle-sim" class="fs-btn fs-btn-resume" onclick="onFsToggleSim()" title="Stop / Resume Simulation">
+        <button id="fs-btn-toggle-sim" class="fs-btn fs-btn-resume" onclick="onFsToggleSim()"
+          title="Stop / Resume Simulation">
           <svg id="fs-icon-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
             <polygon points="5 3 19 12 5 21 5 3"></polygon>
           </svg>
@@ -855,16 +898,22 @@
           <select id="fs-select-breakdown-van" class="fs-van-select" title="Select Van to Breakdown">
             <option value="1">Van 1</option>
           </select>
-          <button id="fs-btn-breakdown" class="fs-btn fs-btn-breakdown" onclick="onFsBreakdown()" title="Trigger Mechanical Breakdown">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+          <button id="fs-btn-breakdown" class="fs-btn fs-btn-breakdown" onclick="onFsBreakdown()"
+            title="Trigger Mechanical Breakdown">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z">
+              </path>
             </svg>
             <span>Breakdown</span>
           </button>
         </div>
 
-        <button id="fs-btn-rush-orders" class="fs-btn fs-btn-rush" onclick="onFsAddRushOrder()" title="Inject Dynamic Rush Customer Demand">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <button id="fs-btn-rush-orders" class="fs-btn fs-btn-rush" onclick="onFsAddRushOrder()"
+          title="Inject Dynamic Rush Customer Demand">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="10"></circle>
             <line x1="12" y1="8" x2="12" y2="16"></line>
             <line x1="8" y1="12" x2="16" y2="12"></line>
@@ -875,8 +924,10 @@
       <div class="fs-bar-divider"></div>
       <div class="fs-bar-section">
         <button class="fs-btn fs-btn-ghost" onclick="toggleMapFullscreen()" title="Exit Fullscreen View">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"></path>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3">
+            </path>
           </svg>
           <span>Exit</span>
         </button>
@@ -1124,16 +1175,16 @@
       if (!isFs && !wrapper.classList.contains('is-fullscreen')) {
         wrapper.classList.add('is-fullscreen');
         if (wrapper.requestFullscreen) {
-          wrapper.requestFullscreen().catch(() => {});
+          wrapper.requestFullscreen().catch(() => { });
         } else if (wrapper.webkitRequestFullscreen) {
-          wrapper.webkitRequestFullscreen().catch(() => {});
+          wrapper.webkitRequestFullscreen().catch(() => { });
         }
       } else {
         wrapper.classList.remove('is-fullscreen');
         if (document.exitFullscreen && (document.fullscreenElement || document.webkitFullscreenElement)) {
-          document.exitFullscreen().catch(() => {});
+          document.exitFullscreen().catch(() => { });
         } else if (document.webkitExitFullscreen && (document.fullscreenElement || document.webkitFullscreenElement)) {
-          document.webkitExitFullscreen().catch(() => {});
+          document.webkitExitFullscreen().catch(() => { });
         }
       }
       const expandIcon = document.getElementById('fs-expand-icon');
@@ -1708,4 +1759,5 @@
     }, 8000);
   </script>
 </body>
+
 </html>

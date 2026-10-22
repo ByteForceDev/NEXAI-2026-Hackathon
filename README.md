@@ -3,11 +3,21 @@
 **Track 4:** AI for Supply Chain & Logistics  
 **Problem Statement 4.3:** Last-Mile Route Planner with Live Re-planning (VRPTW)  
 **Team Name:** ByteForceDev  
-**Deployment:** [Yet To Be Deployed](#)
+**Deployment:** [https://byteforcedev-nexai2026.streamlit.app/](https://byteforcedev-nexai2026.streamlit.app/)
 
 ---
 
-## 1. Problem Statement and Solution Overview
+## Contributors
+
+**Team ByteForceDev (VIT University):**
+
+* **Raghav Mrituanjaya KS** — [@raghavmri](https://github.com/raghavmri)
+* **Rachakonda Guru Karthikeya** — [@Karthik1404-h](https://github.com/Karthik1404-h)
+* **Muppavaram Lohith** — [@LOHITH5506H](https://github.com/LOHITH5506H)
+
+---
+
+## Problem Statement and Solution Overview
 
 ### Problem Statement (PS 4.3)
 Last-mile delivery operations are inherently vulnerable to dynamic operational disruptions:
@@ -29,7 +39,7 @@ We engineered an enterprise-grade, real-time autonomous dynamic routing engine t
 
 ---
 
-## 2. Architecture Diagram and Technology Stack
+## Architecture Diagram and Technology Stack
 
 ### System Flow Diagram
 
@@ -111,7 +121,7 @@ flowchart TD
 
 ---
 
-## 3. Setup and Execution Instructions
+## Setup and Execution Instructions
 
 ### Local Installation
 
@@ -159,13 +169,13 @@ Access the application at `http://localhost:7860`.
 
 ---
 
-## 4. Deployment URL
+## Deployment URL
 
-* **Hugging Face Spaces:** [Yet To Be Deployed](#)
+* **Live Streamlit Application:** [https://byteforcedev-nexai2026.streamlit.app/](https://byteforcedev-nexai2026.streamlit.app/)
 
 ---
 
-## 5. Dataset Attribution and Licence
+## Dataset Attribution and Licence
 
 ### Dataset Attribution
 This project evaluates routing performance using the globally recognized **Solomon VRPTW benchmark, SINTEF (1987)**:
@@ -179,16 +189,6 @@ This project is open-source and released under the **MIT Licence**.
 
 ---
 
-## 6. Team Member Details
-
-**Team ByteForceDev (VIT University):**
-
-* **Raghav Mrituanjaya KS** (23MID0078, VIT University) 
-* **Rachakonda Guru Karthikeya** (23MID0079, VIT University) 
-* **Muppavaram Lohith** (23MID0104, VIT University) 
-
----
-
-## 7. Development History & Audit Trail
+## Development History & Audit Trail
 
 For a complete architectural audit trail, see [DEV_LOG.md](./DEV_LOG.md).
