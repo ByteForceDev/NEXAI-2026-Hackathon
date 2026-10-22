@@ -412,6 +412,11 @@ class SimulationState:
             scaled_due = scale_value(due_val, self.scale_factor)
             scaled_serv = scale_value(serv_val, self.scale_factor)
 
+            # Defensive validation: Ensure time window start <= end to prevent VroomInputException
+            if scaled_due < scaled_ready:
+                scaled_due = scaled_ready + max(scaled_serv, scale_value(60.0, self.scale_factor))
+                due_val = unscale_value(scaled_due, self.scale_factor)
+
             # 4. Check if existing location index is explicitly passed (shared node)
             explicit_loc = cust_dict.get("location_index")
             if explicit_loc is not None and int(explicit_loc) < len(self.scaled_coordinates):
