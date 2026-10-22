@@ -44,7 +44,7 @@ if not logger.handlers:
 
 @dataclass
 class VehicleState:
-    """Tracks dynamic mid-day operational status of a single fleet vehicle."""
+    """Tracks dynamic mid-day operational status and parallel kinematics of a single fleet vehicle."""
     vehicle_id: int
     start_location: int = 0
     remaining_capacity: int = 200
@@ -58,6 +58,18 @@ class VehicleState:
     is_returned_to_depot: bool = False
     is_completed_route: bool = False
     is_broken: bool = False
+
+    # Independent parallel movement state
+    current_x: float = 0.0
+    current_y: float = 0.0
+    current_route: List[Dict[str, Any]] = field(default_factory=list)
+    current_waypoint_index: int = 0
+    speed: float = 1.0  # Units of coordinate distance per unscaled time unit
+    distance_to_next_waypoint: float = 0.0
+    status: str = "At Depot (Idle)"
+    is_active: bool = False
+    assigned_orders: List[int] = field(default_factory=list)
+    route_progress: float = 0.0  # 0.0 to 100.0%
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -74,6 +86,15 @@ class VehicleState:
             "is_returned_to_depot": self.is_returned_to_depot,
             "is_completed_route": self.is_completed_route,
             "is_broken": self.is_broken,
+            "current_x": self.current_x,
+            "current_y": self.current_y,
+            "current_waypoint_index": self.current_waypoint_index,
+            "speed": self.speed,
+            "distance_to_next_waypoint": self.distance_to_next_waypoint,
+            "status": self.status,
+            "is_active": self.is_active,
+            "assigned_orders": list(self.assigned_orders),
+            "route_progress": self.route_progress,
         }
 
 
@@ -146,6 +167,9 @@ class SimulationState:
 
         # Historical audit log for re-planning events
         self.replanning_history: List[Dict[str, Any]] = []
+
+        # Initialize parallel movement state across fleet at T = 0
+        self._update_parallel_vehicle_movement(0.0)
 
     def _seed_initial_pending_jobs(self) -> None:
         """Populate initial pending jobs pool with all customer nodes from the problem instance."""
@@ -309,6 +333,9 @@ class SimulationState:
             v_state.remaining_capacity = max(
                 0, int(self.instance.vehicle_capacity) - v_state.completed_demands
             )
+
+        # Central parallel kinematic update: advances all active vehicles concurrently
+        self._update_parallel_vehicle_movement(T_event_unscaled)
 
         summary = {
             "t_event_unscaled": T_event_unscaled,
@@ -537,6 +564,7 @@ class SimulationState:
         exploration_level: int = 1,
         nb_threads: int = 4,
         profile: str = "car",
+        reason: str = "Dynamic Re-planning Event",
     ) -> Any:
         """
         Execute live sub-second re-planning with the updated operational state.
@@ -609,6 +637,7 @@ class SimulationState:
             telemetry = {
                 "timestamp_scaled": self.current_time,
                 "timestamp_unscaled": unscale_value(self.current_time, self.scale_factor),
+                "description": reason,
                 "runtime_ms": round(elapsed_ms, 2),
                 "cost": 0,
                 "routes_count": 0,
@@ -627,6 +656,7 @@ class SimulationState:
 
         # 5. Record telemetry and update current solution
         self.current_solution = solution
+        self._update_parallel_vehicle_movement(unscale_value(self.current_time, self.scale_factor))
 
         num_routes = (
             len(solution.routes["vehicle_id"].unique())
@@ -637,6 +667,7 @@ class SimulationState:
         telemetry = {
             "timestamp_scaled": self.current_time,
             "timestamp_unscaled": unscale_value(self.current_time, self.scale_factor),
+            "description": reason,
             "runtime_ms": round(elapsed_ms, 2),
             "cost": solution.summary.cost,
             "routes_count": num_routes,
@@ -701,197 +732,198 @@ class SimulationState:
 
         return True
 
-    def get_interpolated_vehicle_positions(self) -> Dict[int, Dict[str, Any]]:
+    def _get_unscaled_node_coords(self, loc_idx: int) -> Tuple[float, float]:
+        """Translate a location index to continuous unscaled (X, Y) coordinates."""
+        if loc_idx == 0:
+            return (float(self.instance.depot.x), float(self.instance.depot.y))
+        if loc_idx < len(self.scaled_coordinates):
+            sx, sy = self.scaled_coordinates[loc_idx]
+            return (
+                unscale_value(sx, self.scale_factor),
+                unscale_value(sy, self.scale_factor),
+            )
+        return (0.0, 0.0)
+
+    def _update_parallel_vehicle_movement(self, t_curr_unscaled: float) -> None:
         """
-        Calculate mathematically continuous interpolated (X, Y) positions for all fleet vehicles.
+        Parallel Vehicle Movement Central Update.
         
-        Guarantees that at T = 0 or before departure, all vehicles are positioned explicitly at the Depot.
-        When in transit between steps A and B, calculates travel fraction alpha = (T - dep_A) / (arr_B - dep_A)
-        and linearly interpolates between node coordinates for smooth animation.
-        
-        Returns:
-            Dict mapping vehicle_id -> dict with 'x', 'y', 'status', 'is_broken', 'is_active', 'location_index'.
+        Advances all active vehicles concurrently during each simulation step.
+        Calculates independent kinematic positions, waypoint indices, distances,
+        speeds, order statuses, and route progress for every vehicle in parallel.
         """
-        positions: Dict[int, Dict[str, Any]] = {}
-        depot_x, depot_y = self.instance.depot.x, self.instance.depot.y
-        t_curr = self.current_time
+        depot_x, depot_y = float(self.instance.depot.x), float(self.instance.depot.y)
+        t_curr_scaled = scale_value(t_curr_unscaled, self.scale_factor)
 
         routes_data = self._extract_routes_data()
         routes_by_veh = {int(r["vehicle_id"]): r.get("steps", []) for r in routes_data}
 
+        # Central parallel loop: compute movement state independently for each vehicle
         for v_id, v_state in self.vehicles.items():
+            # 1. Broken down vehicle (pinned at breakdown location)
             if v_id in self.broken_vehicles or v_state.is_broken:
-                # Disabled vehicle pinned at its breakdown location
-                loc_idx = (
-                    v_state.last_completed_location
-                    if v_state.last_completed_location is not None
-                    else v_state.start_location
-                )
-                if loc_idx == 0:
-                    pos = (depot_x, depot_y)
-                else:
-                    sx, sy = self.scaled_coordinates[loc_idx]
-                    pos = (
-                        unscale_value(sx, self.scale_factor),
-                        unscale_value(sy, self.scale_factor),
+                v_state.is_broken = True
+                v_state.is_active = False
+                v_state.speed = 0.0
+                v_state.distance_to_next_waypoint = 0.0
+                v_state.status = "DISABLED / BREAKDOWN"
+                if v_state.current_x == 0.0 and v_state.current_y == 0.0:
+                    loc = (
+                        v_state.last_completed_location
+                        if v_state.last_completed_location is not None
+                        else v_state.start_location
                     )
-                positions[v_id] = {
-                    "x": pos[0],
-                    "y": pos[1],
-                    "status": "DISABLED / BREAKDOWN",
-                    "is_broken": True,
-                    "is_active": False,
-                    "location_index": loc_idx,
-                }
+                    c = self._get_unscaled_node_coords(loc)
+                    v_state.current_x, v_state.current_y = c[0], c[1]
                 continue
 
             v_steps = routes_by_veh.get(v_id, [])
+            v_state.current_route = v_steps
+
+            # Extract assigned order IDs
+            assigned_orders = [
+                int(s["id"]) for s in v_steps
+                if s.get("type") == "job" and s.get("id") is not None
+            ]
+            v_state.assigned_orders = assigned_orders
+
+            # 2. Idle / Reserve fleet vehicle with no assigned route
             if not v_steps:
-                # Reserve idle vehicle at Depot
-                positions[v_id] = {
-                    "x": depot_x,
-                    "y": depot_y,
-                    "status": "At Depot (Reserve Fleet)",
-                    "is_broken": False,
-                    "is_active": False,
-                    "location_index": 0,
-                }
+                v_state.current_x = depot_x
+                v_state.current_y = depot_y
+                v_state.current_waypoint_index = 0
+                v_state.speed = 0.0
+                v_state.distance_to_next_waypoint = 0.0
+                v_state.status = "At Depot (Reserve Fleet)"
+                v_state.is_active = False
+                v_state.route_progress = 0.0
                 continue
 
             first_step = v_steps[0]
             last_step = v_steps[-1]
-            first_arr = int(first_step.get("arrival", 0))
-            last_arr = int(last_step.get("arrival", 0))
+            first_arr_scaled = int(first_step.get("arrival", 0))
+            last_arr_scaled = int(last_step.get("arrival", 0))
+            num_steps = len(v_steps)
 
-            if t_curr <= first_arr:
-                # Pre-departure: explicitly at Depot
-                positions[v_id] = {
-                    "x": depot_x,
-                    "y": depot_y,
-                    "status": "At Depot (Pre-departure)",
-                    "is_broken": False,
-                    "is_active": True,
-                    "location_index": 0,
-                }
-            elif t_curr >= last_arr:
-                # Returned to Depot: shift complete
-                positions[v_id] = {
-                    "x": depot_x,
-                    "y": depot_y,
-                    "status": "At Depot (Shift Completed)",
-                    "is_broken": False,
-                    "is_active": True,
-                    "location_index": 0,
-                }
-            else:
-                matched = False
-                for i in range(len(v_steps) - 1):
-                    s_curr = v_steps[i]
-                    s_next = v_steps[i + 1]
+            # 3. Pre-departure idle at Depot
+            if t_curr_scaled <= first_arr_scaled:
+                v_state.current_x = depot_x
+                v_state.current_y = depot_y
+                v_state.current_waypoint_index = 0
+                v_state.speed = 0.0
+                v_state.status = "At Depot (Pre-departure)"
+                v_state.is_active = True
+                v_state.route_progress = 0.0
+                if num_steps > 1:
+                    next_loc = int(v_steps[1].get("location_index", 0))
+                    nx, ny = self._get_unscaled_node_coords(next_loc)
+                    v_state.distance_to_next_waypoint = float(np.hypot(nx - depot_x, ny - depot_y))
+                else:
+                    v_state.distance_to_next_waypoint = 0.0
+                continue
 
-                    arr_curr = int(s_curr.get("arrival", 0))
-                    serv_curr = int(s_curr.get("service", 0))
-                    wait_curr = int(s_curr.get("waiting_time", 0))
-                    dep_curr = arr_curr + wait_curr + serv_curr
+            # 4. Route completed: parked back at Depot
+            if t_curr_scaled >= last_arr_scaled:
+                v_state.current_x = depot_x
+                v_state.current_y = depot_y
+                v_state.current_waypoint_index = num_steps - 1
+                v_state.speed = 0.0
+                v_state.distance_to_next_waypoint = 0.0
+                v_state.status = "At Depot (Route Completed)"
+                v_state.is_active = False
+                v_state.is_returned_to_depot = True
+                v_state.is_completed_route = True
+                v_state.route_progress = 100.0
+                continue
 
-                    arr_next = int(s_next.get("arrival", 0))
+            # 5. Active route execution: traverse waypoints with distance-based interpolation
+            v_state.is_active = True
+            v_state.is_returned_to_depot = False
+            v_state.is_completed_route = False
 
-                    loc_curr = int(s_curr.get("location_index", 0))
-                    loc_next = int(s_next.get("location_index", 0))
+            matched = False
+            for i in range(num_steps - 1):
+                s_curr = v_steps[i]
+                s_next = v_steps[i + 1]
 
-                    # Case A: At current stop (waiting or servicing)
-                    if arr_curr <= t_curr <= dep_curr:
-                        if loc_curr == 0:
-                            c_curr = (depot_x, depot_y)
-                        else:
-                            sx, sy = self.scaled_coordinates[loc_curr]
-                            c_curr = (
-                                unscale_value(sx, self.scale_factor),
-                                unscale_value(sy, self.scale_factor),
-                            )
+                arr_curr = int(s_curr.get("arrival", 0))
+                serv_curr = int(s_curr.get("service", 0))
+                wait_curr = int(s_curr.get("waiting_time", 0))
+                dep_curr = arr_curr + wait_curr + serv_curr
+                arr_next = int(s_next.get("arrival", 0))
 
-                        job_label = (
-                            f"Stop #{s_curr.get('id')}"
-                            if s_curr.get("id") is not None
-                            else "Depot"
-                        )
-                        positions[v_id] = {
-                            "x": c_curr[0],
-                            "y": c_curr[1],
-                            "status": f"At {job_label} (Servicing/Waiting)",
-                            "is_broken": False,
-                            "is_active": True,
-                            "location_index": loc_curr,
-                        }
-                        matched = True
-                        break
+                loc_curr = int(s_curr.get("location_index", 0))
+                loc_next = int(s_next.get("location_index", 0))
+                c_curr = self._get_unscaled_node_coords(loc_curr)
+                c_next = self._get_unscaled_node_coords(loc_next)
+                seg_dist = float(np.hypot(c_next[0] - c_curr[0], c_next[1] - c_curr[1]))
 
-                    # Case B: In transit between s_curr and s_next
-                    elif dep_curr < t_curr < arr_next:
-                        if loc_curr == 0:
-                            c_curr = (depot_x, depot_y)
-                        else:
-                            sx, sy = self.scaled_coordinates[loc_curr]
-                            c_curr = (
-                                unscale_value(sx, self.scale_factor),
-                                unscale_value(sy, self.scale_factor),
-                            )
+                # Case A: Vehicle stopped at waypoint i (waiting or servicing order)
+                if arr_curr <= t_curr_scaled <= dep_curr:
+                    v_state.current_x = c_curr[0]
+                    v_state.current_y = c_curr[1]
+                    v_state.current_waypoint_index = i
+                    v_state.distance_to_next_waypoint = seg_dist
+                    v_state.speed = 0.0
 
-                        if loc_next == 0:
-                            c_next = (depot_x, depot_y)
-                        else:
-                            sx, sy = self.scaled_coordinates[loc_next]
-                            c_next = (
-                                unscale_value(sx, self.scale_factor),
-                                unscale_value(sy, self.scale_factor),
-                            )
+                    job_lbl = f"Stop #{s_curr.get('id')}" if s_curr.get("id") is not None else "Depot"
+                    action_lbl = "Waiting" if t_curr_scaled < (arr_curr + wait_curr) else "Servicing"
+                    v_state.status = f"{action_lbl} at {job_lbl}"
+                    v_state.route_progress = round((i / max(1, num_steps - 1)) * 100.0, 1)
+                    matched = True
+                    break
 
-                        dt = arr_next - dep_curr
-                        alpha = (t_curr - dep_curr) / dt if dt > 0 else 0.0
-                        alpha = max(0.0, min(1.0, alpha))
+                # Case B: In transit between waypoint i and waypoint i+1
+                elif dep_curr < t_curr_scaled < arr_next:
+                    travel_time_scaled = arr_next - dep_curr
+                    alpha = (t_curr_scaled - dep_curr) / travel_time_scaled if travel_time_scaled > 0 else 1.0
+                    alpha = max(0.0, min(1.0, alpha))
 
-                        interp_x = c_curr[0] + alpha * (c_next[0] - c_curr[0])
-                        interp_y = c_curr[1] + alpha * (c_next[1] - c_curr[1])
+                    # Continuous distance-based coordinate interpolation
+                    v_state.current_x = c_curr[0] + alpha * (c_next[0] - c_curr[0])
+                    v_state.current_y = c_curr[1] + alpha * (c_next[1] - c_curr[1])
+                    v_state.current_waypoint_index = i
+                    v_state.distance_to_next_waypoint = (1.0 - alpha) * seg_dist
 
-                        from_lbl = (
-                            f"#{s_curr.get('id')}"
-                            if s_curr.get("id") is not None
-                            else "Depot"
-                        )
-                        to_lbl = (
-                            f"#{s_next.get('id')}"
-                            if s_next.get("id") is not None
-                            else "Depot"
-                        )
+                    travel_time_unscaled = unscale_value(travel_time_scaled, self.scale_factor)
+                    v_state.speed = seg_dist / travel_time_unscaled if travel_time_unscaled > 0 else 1.0
 
-                        positions[v_id] = {
-                            "x": interp_x,
-                            "y": interp_y,
-                            "status": f"In Transit: {from_lbl} ➔ {to_lbl} ({alpha*100:.0f}%)",
-                            "is_broken": False,
-                            "is_active": True,
-                            "location_index": loc_curr,
-                        }
-                        matched = True
-                        break
+                    from_lbl = f"#{s_curr.get('id')}" if s_curr.get("id") is not None else "Depot"
+                    to_lbl = f"#{s_next.get('id')}" if s_next.get("id") is not None else "Depot"
+                    v_state.status = f"In Transit: {from_lbl} ➔ {to_lbl} ({alpha*100:.0f}%)"
+                    v_state.route_progress = round(((i + alpha) / max(1, num_steps - 1)) * 100.0, 1)
+                    matched = True
+                    break
 
-                if not matched:
-                    loc_idx = v_state.start_location
-                    if loc_idx == 0:
-                        pos = (depot_x, depot_y)
-                    else:
-                        sx, sy = self.scaled_coordinates[loc_idx]
-                        pos = (
-                            unscale_value(sx, self.scale_factor),
-                            unscale_value(sy, self.scale_factor),
-                        )
-                    positions[v_id] = {
-                        "x": pos[0],
-                        "y": pos[1],
-                        "status": "In Operation",
-                        "is_broken": False,
-                        "is_active": True,
-                        "location_index": loc_idx,
-                    }
+            if not matched:
+                loc = v_state.start_location
+                c = self._get_unscaled_node_coords(loc)
+                v_state.current_x, v_state.current_y = c[0], c[1]
+                v_state.status = "In Operation"
+                v_state.speed = 1.0
+                v_state.distance_to_next_waypoint = 0.0
 
+    def get_interpolated_vehicle_positions(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Return the current parallel kinematic positions and movement states for all fleet vehicles.
+        
+        Guarantees that all active vehicles advance concurrently during each simulation interval.
+        Each vehicle maintains its own movement state (ID, coordinates, route, waypoint index,
+        speed, distance to next waypoint, status, assigned orders, route progress).
+        """
+        positions: Dict[int, Dict[str, Any]] = {}
+        for vid, v in self.vehicles.items():
+            positions[vid] = {
+                "x": v.current_x,
+                "y": v.current_y,
+                "status": v.status,
+                "is_broken": v.is_broken,
+                "is_active": v.is_active,
+                "waypoint_index": v.current_waypoint_index,
+                "speed": v.speed,
+                "distance_to_next_waypoint": v.distance_to_next_waypoint,
+                "assigned_orders": list(v.assigned_orders),
+                "route_progress": v.route_progress,
+                "location_index": v.start_location,
+            }
         return positions

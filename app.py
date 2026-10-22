@@ -22,6 +22,14 @@ from src.simulator import SimulationState
 from src.utils import resolve_location_index, unscale_value
 from src.vrptw_solver import create_vroom_problem
 
+# ==============================================================================
+# Simulation Timing Configuration (Constants)
+# ==============================================================================
+# UI live tracking fragment refresh rate (configurable in 200–500ms range)
+SIMULATION_REFRESH_INTERVAL_SEC: float = 0.30  # 300 ms refresh interval
+# Virtual clock timestep advanced concurrently per simulation step
+SIMULATION_TIMESTEP_SEC: float = 2.0           # 2.0 seconds per step
+
 # Page Configuration: Clean, minimal, light mode
 st.set_page_config(
     page_title="NEXAI | Autonomous Route Engine",
@@ -155,7 +163,23 @@ st.markdown(
         transform: scale(0.985) !important;
     }
 
+    /* Sidebar Compact Stacked Buttons */
+    [data-testid="stSidebar"] button {
+        font-size: 0.78rem !important;
+        padding: 0.28rem 0.55rem !important;
+        min-height: 2.05rem !important;
+        height: 2.05rem !important;
+        line-height: 1.2 !important;
+        border-radius: 6px !important;
+        font-weight: 500 !important;
+        margin: 0 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:has(button) {
+        margin-bottom: 0.2rem !important;
+    }
+
     /* 1. Play / Start / Resume Button (Minimal Emerald Green Accent) */
+    div:has(.btn-ctrl-play) + div button,
     div[data-testid="column"]:has(.btn-ctrl-play) button,
     button:has([data-testid="stIconMaterial"]:contains("play_arrow")) {
         background-color: #059669 !important;
@@ -163,101 +187,117 @@ st.markdown(
         color: #ffffff !important;
         box-shadow: 0 1px 2px rgba(5, 150, 105, 0.2) !important;
     }
+    div:has(.btn-ctrl-play) + div button:hover:not(:disabled),
     div[data-testid="column"]:has(.btn-ctrl-play) button:hover:not(:disabled) {
         background-color: #047857 !important;
         border-color: #065f46 !important;
         color: #ffffff !important;
         box-shadow: 0 4px 6px -1px rgba(5, 150, 105, 0.25) !important;
     }
+    div:has(.btn-ctrl-play) + div button [data-testid="stIconMaterial"],
     div[data-testid="column"]:has(.btn-ctrl-play) button [data-testid="stIconMaterial"] {
         color: #ffffff !important;
     }
 
     /* 2. Pause Button (Minimal Warm Amber Accent) */
+    div:has(.btn-ctrl-pause) + div button,
     div[data-testid="column"]:has(.btn-ctrl-pause) button {
         background-color: #fffbeb !important;
         border: 1px solid #fde68a !important;
         color: #b45309 !important;
         box-shadow: 0 1px 2px rgba(245, 158, 11, 0.1) !important;
     }
+    div:has(.btn-ctrl-pause) + div button:hover:not(:disabled),
     div[data-testid="column"]:has(.btn-ctrl-pause) button:hover:not(:disabled) {
         background-color: #fef3c7 !important;
         border-color: #f59e0b !important;
         color: #92400e !important;
     }
+    div:has(.btn-ctrl-pause) + div button[kind="primary"],
     div[data-testid="column"]:has(.btn-ctrl-pause) button[kind="primary"] {
         background-color: #d97706 !important;
         border-color: #b45309 !important;
         color: #ffffff !important;
     }
+    div:has(.btn-ctrl-pause) + div button[kind="primary"] [data-testid="stIconMaterial"],
     div[data-testid="column"]:has(.btn-ctrl-pause) button[kind="primary"] [data-testid="stIconMaterial"] {
         color: #ffffff !important;
     }
+    div:has(.btn-ctrl-pause) + div button:not([kind="primary"]) [data-testid="stIconMaterial"],
     div[data-testid="column"]:has(.btn-ctrl-pause) button:not([kind="primary"]) [data-testid="stIconMaterial"] {
         color: #d97706 !important;
     }
 
     /* 3. Step Button (Minimal Tech Blue Accent) */
+    div:has(.btn-ctrl-step) + div button,
     div[data-testid="column"]:has(.btn-ctrl-step) button {
         background-color: #eff6ff !important;
         border: 1px solid #bfdbfe !important;
         color: #1d4ed8 !important;
         box-shadow: 0 1px 2px rgba(37, 99, 235, 0.08) !important;
     }
+    div:has(.btn-ctrl-step) + div button:hover:not(:disabled),
     div[data-testid="column"]:has(.btn-ctrl-step) button:hover:not(:disabled) {
         background-color: #dbeafe !important;
         border-color: #93c5fd !important;
         color: #1e40af !important;
     }
+    div:has(.btn-ctrl-step) + div button [data-testid="stIconMaterial"],
     div[data-testid="column"]:has(.btn-ctrl-step) button [data-testid="stIconMaterial"] {
         color: #2563eb !important;
     }
 
     /* 4. Trigger Breakdown Button (Minimal Crimson Danger Accent) */
+    div:has(.btn-ctrl-breakdown) + div button,
     div[data-testid="column"]:has(.btn-ctrl-breakdown) button {
         background-color: #fef2f2 !important;
         border: 1px solid #fecaca !important;
         color: #dc2626 !important;
         box-shadow: 0 1px 2px rgba(220, 38, 38, 0.08) !important;
     }
+    div:has(.btn-ctrl-breakdown) + div button:hover:not(:disabled),
     div[data-testid="column"]:has(.btn-ctrl-breakdown) button:hover:not(:disabled) {
         background-color: #fee2e2 !important;
         border-color: #f87171 !important;
         color: #b91c1c !important;
     }
+    div:has(.btn-ctrl-breakdown) + div button [data-testid="stIconMaterial"],
     div[data-testid="column"]:has(.btn-ctrl-breakdown) button [data-testid="stIconMaterial"] {
         color: #dc2626 !important;
     }
 
     /* 5. Inject Rush Orders Button (Minimal Violet Surge Accent) */
+    div:has(.btn-ctrl-rush) + div button,
     div[data-testid="column"]:has(.btn-ctrl-rush) button {
         background-color: #faf5ff !important;
         border: 1px solid #e9d5ff !important;
         color: #7c3aed !important;
         box-shadow: 0 1px 2px rgba(124, 58, 237, 0.08) !important;
     }
+    div:has(.btn-ctrl-rush) + div button:hover:not(:disabled),
     div[data-testid="column"]:has(.btn-ctrl-rush) button:hover:not(:disabled) {
         background-color: #f3e8ff !important;
         border-color: #c084fc !important;
         color: #6d28d9 !important;
     }
+    div:has(.btn-ctrl-rush) + div button [data-testid="stIconMaterial"],
     div[data-testid="column"]:has(.btn-ctrl-rush) button [data-testid="stIconMaterial"] {
         color: #7c3aed !important;
     }
 
     /* 6. Reset Simulation Button (Sidebar Subtle Zinc with Red Hover) */
-    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:not([key="btn_play"]):not([key="btn_pause"]) {
         background-color: #ffffff !important;
         border: 1px solid #e4e4e7 !important;
         color: #64748b !important;
         box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02) !important;
     }
-    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover {
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:not([key="btn_play"]):not([key="btn_pause"]):hover {
         background-color: #fef2f2 !important;
         border-color: #fca5a5 !important;
         color: #dc2626 !important;
     }
-    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:hover [data-testid="stIconMaterial"] {
+    [data-testid="stSidebar"] [data-testid="stBaseButton-secondary"]:not([key="btn_play"]):not([key="btn_pause"]):hover [data-testid="stIconMaterial"] {
         color: #dc2626 !important;
     }
 
@@ -348,6 +388,85 @@ st.markdown(
         border-radius: 50%;
         background-color: #f59e0b;
         display: inline-block;
+    }
+
+    /* Package Manifest Custom Centered Table with Dynamic Glow Animations */
+    .manifest-table-container {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #ffffff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+        margin-bottom: 1.15rem;
+    }
+    .manifest-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'Poppins', sans-serif !important;
+        margin: 0;
+    }
+    .manifest-table th {
+        background-color: #f8fafc;
+        color: #71717a;
+        font-size: 0.73rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 0.75rem 1rem;
+        text-align: center !important;
+        border-bottom: 1px solid #e4e4e7;
+    }
+    .manifest-table td {
+        padding: 0.72rem 1rem;
+        font-size: 0.85rem;
+        color: #09090b;
+        text-align: center !important;
+        vertical-align: middle !important;
+        border-bottom: 1px solid #f1f5f9;
+        transition: background-color 0.4s ease, color 0.4s ease;
+    }
+    .manifest-table tr:last-child td {
+        border-bottom: none;
+    }
+    .manifest-table tr:hover td {
+        background-color: #fafafa;
+    }
+
+    /* Dynamic visual update change highlights */
+    @keyframes pulse-highlight-green {
+        0% { background-color: #d1fae5; color: #065f46; transform: scale(1.06); }
+        50% { background-color: #a7f3d0; color: #065f46; transform: scale(1.08); }
+        100% { background-color: #ecfdf5; color: #047857; transform: scale(1.0); }
+    }
+    @keyframes pulse-highlight-purple {
+        0% { background-color: #ede9fe; color: #5b21b6; transform: scale(1.06); }
+        50% { background-color: #ddd6fe; color: #5b21b6; transform: scale(1.08); }
+        100% { background-color: #f5f3ff; color: #6d28d9; transform: scale(1.0); }
+    }
+    @keyframes pulse-highlight-amber {
+        0% { background-color: #fef3c7; color: #92400e; transform: scale(1.06); }
+        50% { background-color: #fde68a; color: #92400e; transform: scale(1.08); }
+        100% { background-color: #fffbeb; color: #b45309; transform: scale(1.0); }
+    }
+
+    .tag-anim-green {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        animation: pulse-highlight-green 1.4s ease-out;
+    }
+    .tag-anim-purple {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        animation: pulse-highlight-purple 1.6s ease-out;
+    }
+    .tag-anim-amber {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        animation: pulse-highlight-amber 1.4s ease-out;
     }
 
     /* Tabs (Shadcn Light Segmented Control style) */
@@ -449,6 +568,7 @@ def init_simulation_state() -> None:
             {
                 "timestamp_scaled": 0,
                 "timestamp_unscaled": 0.0,
+                "description": "Initial Global Dispatch Plan",
                 "runtime_ms": round(init_runtime_ms, 2),
                 "cost": initial_solution.summary.cost,
                 "routes_count": len(initial_solution.routes["vehicle_id"].unique()),
@@ -461,11 +581,157 @@ def init_simulation_state() -> None:
         st.session_state.is_simulating = False
         st.session_state.rush_order_count = 0
 
+        # Baseline customer-to-vehicle mapping to track newly assigned packages
+        init_assignments = {}
+        if hasattr(initial_solution, "routes") and isinstance(initial_solution.routes, pd.DataFrame):
+            for _, r in initial_solution.routes.iterrows():
+                if r.get("type") == "job" and pd.notna(r.get("id")):
+                    init_assignments[int(r["id"])] = int(r["vehicle_id"])
+        st.session_state.initial_assignments = init_assignments
+
 
 if "sim" not in st.session_state:
     init_simulation_state()
 
+if "initial_assignments" not in st.session_state:
+    init_assign = {}
+    init_sol = getattr(st.session_state.sim, "initial_solution", None)
+    if init_sol and hasattr(init_sol, "routes") and isinstance(init_sol.routes, pd.DataFrame):
+        for _, r in init_sol.routes.iterrows():
+            if r.get("type") == "job" and pd.notna(r.get("id")):
+                init_assign[int(r["id"])] = int(r["vehicle_id"])
+    st.session_state.initial_assignments = init_assign
+
 sim: SimulationState = st.session_state.sim
+
+
+def render_fleet_package_manifest_html(sim_state: SimulationState) -> str:
+    """
+    Generate centered, Shadcn-styled HTML table with real-time visual color highlights
+    and animations on data updates.
+    """
+    init_assign = st.session_state.get("initial_assignments", {})
+    prev_state = st.session_state.get("prev_manifest_state", {})
+    new_state = {}
+
+    routes_df = (
+        sim_state.current_solution.routes
+        if hasattr(sim_state.current_solution, "routes") and isinstance(sim_state.current_solution.routes, pd.DataFrame)
+        else pd.DataFrame()
+    )
+
+    curr_jobs_by_van: Dict[int, List[int]] = {}
+    if not routes_df.empty:
+        job_rows = routes_df[routes_df["type"] == "job"]
+        for vid, grp in job_rows.groupby("vehicle_id"):
+            curr_jobs_by_van[int(vid)] = [int(j) for j in grp["id"].dropna()]
+
+    all_vids = set(curr_jobs_by_van.keys())
+    for vid, vstate in sim_state.vehicles.items():
+        if vstate.completed_job_ids or vstate.is_broken or vid in curr_jobs_by_van or vid <= 3:
+            all_vids.add(vid)
+
+    html_rows = []
+    for vid in sorted(all_vids):
+        vstate = sim_state.vehicles.get(vid)
+        is_broken = vstate.is_broken if vstate else False
+        completed_jobs = list(vstate.completed_job_ids) if vstate else []
+
+        assigned_jobs = curr_jobs_by_van.get(vid, [])
+        remaining_jobs = [j for j in assigned_jobs if j in sim_state.pending_jobs]
+
+        total_packages = len(completed_jobs) + len(remaining_jobs)
+        rem_count = len(remaining_jobs)
+
+        newly_assigned_items = []
+        for j in remaining_jobs:
+            if j not in init_assign:
+                newly_assigned_items.append(f"Rush #{j}")
+            elif init_assign[j] != vid:
+                orig_van = init_assign[j]
+                newly_assigned_items.append(f"#{j} (from Van {orig_van})")
+
+        for j in completed_jobs:
+            if j not in init_assign:
+                newly_assigned_items.append(f"Rush #{j} [Done]")
+            elif init_assign[j] != vid:
+                orig_van = init_assign[j]
+                newly_assigned_items.append(f"#{j} [Done]")
+
+        new_count = len(newly_assigned_items)
+
+        # Detect dynamic updates compared to previous tick
+        prev = prev_state.get(vid)
+        is_rem_changed = (prev is not None and prev.get("rem") != rem_count)
+        is_tot_changed = (prev is not None and prev.get("tot") != total_packages)
+        is_new_changed = (prev is not None and prev.get("new") != new_count)
+        is_broken_changed = (prev is not None and prev.get("broken") != is_broken)
+
+        new_state[vid] = {"tot": total_packages, "rem": rem_count, "new": new_count, "broken": is_broken}
+
+        # 1. Van ID Badge
+        if is_broken:
+            anim_cls = "tag-anim-amber" if is_broken_changed else ""
+            van_badge = f'<span class="nexai-tag tag-rose {anim_cls}" style="font-weight: 600; font-size: 0.8rem;">Van {vid} [DISABLED]</span>'
+        else:
+            base_col = ROUTE_COLORS[(vid - 1) % len(ROUTE_COLORS)]
+            van_badge = f'<span class="nexai-tag tag-slate" style="font-weight: 600; font-size: 0.8rem; border-left: 3px solid {base_col};">Van {vid}</span>'
+
+        # 2. Total Packages Badge
+        if is_tot_changed:
+            tot_badge = f'<span class="nexai-tag tag-blue tag-anim-purple" style="font-weight: 600; font-size: 0.85rem;">{total_packages} pkgs</span>'
+        else:
+            tot_badge = f'<span style="font-weight: 600; font-size: 0.92rem; color: #09090b;">{total_packages}</span>'
+
+        # 3. Remaining Packages Badge (Changes color and pulses upon delivery!)
+        if is_broken:
+            rem_badge = '<span class="nexai-tag tag-rose" style="font-size: 0.78rem;">0 (Offline)</span>'
+        elif is_rem_changed:
+            rem_badge = f'<span class="nexai-tag tag-emerald tag-anim-green" style="font-weight: 600; font-size: 0.82rem;"><span class="pulse-dot"></span> {rem_count} pkgs (Delivered!)</span>'
+        elif rem_count == 0:
+            rem_badge = '<span class="nexai-tag tag-emerald" style="font-weight: 500; font-size: 0.78rem;">0 (Complete)</span>'
+        else:
+            rem_badge = f'<span class="nexai-tag tag-blue" style="font-weight: 500; font-size: 0.8rem;">{rem_count} pkgs</span>'
+
+        # 4. Newly Assigned Badge (Color highlight on injection or breakdown)
+        if is_broken:
+            new_badge = '<span class="nexai-tag tag-amber" style="font-size: 0.78rem;">Reassigned to Fleet</span>'
+        elif new_count > 0:
+            preview = ", ".join(newly_assigned_items[:2])
+            suffix = "..." if new_count > 2 else ""
+            label_text = f"+{new_count} ({preview}{suffix})"
+            anim_cls = "tag-anim-purple" if is_new_changed else ""
+            new_badge = f'<span class="nexai-tag tag-violet {anim_cls}" style="font-weight: 600; font-size: 0.8rem;">{label_text}</span>'
+        else:
+            new_badge = '<span style="color: #a1a1aa; font-size: 0.82rem;">0 (None)</span>'
+
+        html_rows.append(
+            f'<tr>'
+            f'<td style="text-align: center;">{van_badge}</td>'
+            f'<td style="text-align: center;">{tot_badge}</td>'
+            f'<td style="text-align: center;">{rem_badge}</td>'
+            f'<td style="text-align: center;">{new_badge}</td>'
+            f'</tr>'
+        )
+
+    st.session_state.prev_manifest_state = new_state
+
+    rows_str = "".join(html_rows)
+    table_html = (
+        '<div class="manifest-table-container">'
+        '<table class="manifest-table">'
+        '<thead><tr>'
+        '<th style="width: 20%; text-align: center;">Van ID</th>'
+        '<th style="width: 25%; text-align: center;">Total Packages to be delivered</th>'
+        '<th style="width: 25%; text-align: center;">Remaining Packages</th>'
+        '<th style="width: 30%; text-align: center;">Newly assigned if any as per algorithm</th>'
+        '</tr></thead>'
+        f'<tbody>{rows_str}</tbody>'
+        '</table>'
+        '</div>'
+    )
+    return table_html
+
 
 
 # ==============================================================================
@@ -498,6 +764,119 @@ ROUTE_COLORS = [
     "#db2777",  # Van 7 (Rose)
     "#0891b2",  # Van 8 (Cyan)
 ]
+
+
+def render_route_manifest_table_html(sim_state: SimulationState) -> str:
+    """Generate centered HTML table for Route Manifest tab."""
+    routes_df = (
+        sim_state.current_solution.routes
+        if hasattr(sim_state.current_solution, "routes") and isinstance(sim_state.current_solution.routes, pd.DataFrame)
+        else pd.DataFrame()
+    )
+    if routes_df.empty:
+        return '<div style="padding: 1.5rem; text-align: center; color: #71717a; font-size: 0.85rem;">No active vehicle routes to display.</div>'
+
+    rows = []
+    for _, r in routes_df.iterrows():
+        vid = int(r["vehicle_id"]) if pd.notna(r.get("vehicle_id")) else 0
+        step_type = str(r.get("type", ""))
+        cid = str(int(r["id"])) if pd.notna(r.get("id")) and r.get("type") == "job" else "-"
+        loc_idx = str(int(r["location_index"])) if pd.notna(r.get("location_index")) else "-"
+
+        loc_coord = get_node_coords(sim_state, int(r["location_index"])) if pd.notna(r.get("location_index")) else (0.0, 0.0)
+        x_str = f"{loc_coord[0]:.1f}"
+        y_str = f"{loc_coord[1]:.1f}"
+
+        arr = f"{unscale_value(r['arrival'], sim_state.scale_factor):.1f}s" if pd.notna(r.get("arrival")) else "-"
+        serv = f"{unscale_value(r['service'], sim_state.scale_factor):.1f}s" if pd.notna(r.get("service")) else "0.0s"
+
+        base_col = ROUTE_COLORS[(vid - 1) % len(ROUTE_COLORS)]
+        van_badge = f'<span class="nexai-tag tag-slate" style="font-weight: 600; font-size: 0.8rem; border-left: 3px solid {base_col};">Van {vid}</span>'
+
+        if step_type == "start":
+            type_badge = '<span class="nexai-tag tag-blue" style="font-size: 0.75rem;">Depot Start</span>'
+        elif step_type == "end":
+            type_badge = '<span class="nexai-tag tag-slate" style="font-size: 0.75rem;">Depot Return</span>'
+        else:
+            type_badge = '<span class="nexai-tag tag-emerald" style="font-size: 0.75rem;">Customer Delivery</span>'
+
+        rows.append(
+            '<tr>'
+            f'<td style="text-align: center;">{van_badge}</td>'
+            f'<td style="text-align: center;">{type_badge}</td>'
+            f'<td style="text-align: center; font-weight: 600;">{cid}</td>'
+            f'<td style="text-align: center; color: #71717a;">{loc_idx}</td>'
+            f'<td style="text-align: center; font-family: monospace; font-size: 0.8rem;">({x_str}, {y_str})</td>'
+            f'<td style="text-align: center; font-weight: 500; color: #2563eb;">{arr}</td>'
+            f'<td style="text-align: center; color: #71717a;">{serv}</td>'
+            '</tr>'
+        )
+
+    rows_str = "".join(rows)
+    return (
+        '<div class="manifest-table-container" style="max-height: 420px; overflow-y: auto;">'
+        '<table class="manifest-table">'
+        '<thead><tr>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Van ID</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Step Type</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Customer ID</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Matrix Index</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Coordinates (X, Y)</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Arrival (T)</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Service Duration</th>'
+        '</tr></thead>'
+        f'<tbody>{rows_str}</tbody>'
+        '</table>'
+        '</div>'
+    )
+
+
+def render_raw_audit_table_html(sim_state: SimulationState) -> str:
+    """Generate centered HTML table for Raw Tab with Description column."""
+    if not sim_state.replanning_history:
+        return '<div style="padding: 1.5rem; text-align: center; color: #71717a; font-size: 0.85rem;">No re-planning events recorded yet.</div>'
+
+    rows = []
+    for h in reversed(sim_state.replanning_history):
+        clk = f"T = {h.get('timestamp_unscaled', 0.0):.1f}s"
+        desc = h.get("description", "Dynamic Re-planning Event")
+        rt = f"{h.get('runtime_ms', 0.0):.2f} ms"
+        cost = f"{h.get('cost', 0):,}"
+        routes = str(h.get("routes_count", 0))
+        pending = str(h.get("pending_jobs_count", 0))
+        active_veh = str(h.get("active_vehicles_count", 0))
+
+        desc_badge = f'<span class="nexai-tag tag-slate" style="font-weight: 500; font-size: 0.8rem;">{desc}</span>'
+
+        rows.append(
+            '<tr>'
+            f'<td style="text-align: center; font-weight: 600; color: #2563eb;">{clk}</td>'
+            f'<td style="text-align: center;">{desc_badge}</td>'
+            f'<td style="text-align: center; font-weight: 500; color: #059669;">{rt}</td>'
+            f'<td style="text-align: center; color: #71717a;">{cost}</td>'
+            f'<td style="text-align: center; font-weight: 600;">{routes}</td>'
+            f'<td style="text-align: center;">{pending}</td>'
+            f'<td style="text-align: center;">{active_veh}</td>'
+            '</tr>'
+        )
+
+    rows_str = "".join(rows)
+    return (
+        '<div class="manifest-table-container" style="max-height: 420px; overflow-y: auto;">'
+        '<table class="manifest-table">'
+        '<thead><tr>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Simulation Clock (T)</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Description</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Solver Compute Time</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">VROOM Cost</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Active Routes</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Pending Jobs</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Available Fleet</th>'
+        '</tr></thead>'
+        f'<tbody>{rows_str}</tbody>'
+        '</table>'
+        '</div>'
+    )
 
 
 def _compute_map_bounds(sim_state: SimulationState) -> Tuple[List[float], List[float]]:
@@ -810,6 +1189,10 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
                     f"<b>Van #{v_id} [{'Disabled' if is_broken else 'Active'}]</b><br>"
                     f"Coordinates: ({p_info['x']:.1f}, {p_info['y']:.1f})<br>"
                     f"Status: {status_str}<br>"
+                    f"Waypoint: Stop #{p_info.get('waypoint_index', 0)}<br>"
+                    f"Distance to Next Stop: {p_info.get('distance_to_next_waypoint', 0.0):.1f} units<br>"
+                    f"Speed: {p_info.get('speed', 1.0):.1f} units/s<br>"
+                    f"Route Progress: {p_info.get('route_progress', 0.0):.1f}%<br>"
                     f"Remaining Capacity: {sim_state.vehicles[v_id].remaining_capacity} units"
                 ] if not is_idle_at_depot else None,
                 showlegend=False,
@@ -932,136 +1315,48 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
 
 
 # ==============================================================================
-# 5. Sidebar: Setup & Simulation Summary
+# ==============================================================================
+# 5. Sidebar: Setup, Simulation & Disruption Controls
 # ==============================================================================
 with st.sidebar:
-    st.markdown('<div class="section-title">Dispatch Controls</div>', unsafe_allow_html=True)
-    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.75rem 0 1.25rem 0;"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title" style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem;">Simulation & Disruption Controls</div>', unsafe_allow_html=True)
+    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.25rem 0 0.5rem 0;"></div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="control-label">Virtual Clock Horizon</div>', unsafe_allow_html=True)
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        st.caption("Active State")
-        is_sim_active = st.session_state.get("is_simulating", False)
-        if sim.is_simulation_completed():
-            st.markdown('<span class="nexai-tag tag-blue"><span class="material-symbols-rounded" style="font-size: 12px;">check_circle</span> Complete</span>', unsafe_allow_html=True)
-        elif is_sim_active:
-            st.markdown('<span class="nexai-tag tag-emerald"><span class="pulse-dot"></span> Simulating</span>', unsafe_allow_html=True)
-        else:
-            st.markdown('<span class="nexai-tag tag-amber"><span class="pulse-dot-amber"></span> Paused</span>', unsafe_allow_html=True)
-    with col_c2:
-        st.caption("Depot Horizon")
-        st.markdown(f'<div style="font-size: 1.1rem; font-weight: 600; color: #71717a;">T = {sim.instance.depot.due_date:.0f}s</div>', unsafe_allow_html=True)
-
-    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 1.25rem 0;"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="control-label">Fleet Status</div>', unsafe_allow_html=True)
-
-    broken_count = len(sim.broken_vehicles)
-    operational_count = len(sim.vehicles) - broken_count
-    st.markdown(
-        f"""
-        <div style="display: flex; flex-direction: column; gap: 0.65rem; font-size: 0.82rem; margin-top: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Total Fleet</span>
-                <span class="nexai-tag tag-slate">{len(sim.vehicles)} Vans</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Operational</span>
-                <span class="nexai-tag tag-emerald">● {operational_count} Active</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Disabled</span>
-                <span class="nexai-tag {'tag-rose' if broken_count > 0 else 'tag-slate'}">● {broken_count} Offline</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Completed Stops</span>
-                <span class="nexai-tag tag-blue">{len(sim.completed_jobs)} / {sim.instance.num_customers} Done</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 1.25rem 0;"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="btn-ctrl-reset"></div>', unsafe_allow_html=True)
-    if st.button("Reset Simulation", icon=":material/restart_alt:", width="stretch", key="btn_reset"):
-        st.session_state.clear()
-        init_simulation_state()
-        st.rerun()
-
-
-# ==============================================================================
-# 6. Main Dashboard Header & Disruption Controls
-# ==============================================================================
-# Brand Title Header with Minimal Color Badges
-st.markdown(
-    """
-    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
-        <div>
-            <div style="display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;">
-                <h2 style="margin: 0; font-size: 1.45rem; font-weight: 700; color: #09090b; letter-spacing: -0.02em;">NEXAI Autonomous Route Engine</h2>
-                <span class="nexai-tag tag-blue"><span class="material-symbols-rounded" style="font-size: 13px;">route</span> Problem 4.3 VRPTW</span>
-            </div>
-            <p style="margin: 0.25rem 0 0 0; font-size: 0.82rem; color: #71717a;">Autonomous Live Dispatch & Re-planning Engine with Smooth Kinematics</p>
-        </div>
-        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-            <span class="nexai-tag tag-emerald"><span class="material-symbols-rounded" style="font-size: 13px;">memory</span> pyvroom C++</span>
-            <span class="nexai-tag tag-slate"><span class="material-symbols-rounded" style="font-size: 13px;">dataset</span> Solomon C101</span>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown('<div class="section-title">Simulation & Disruption Controls</div>', unsafe_allow_html=True)
-col_ctrl1, col_ctrl2, col_ctrl3 = st.columns([1.6, 1.2, 1.2], gap="medium")
-
-# --- Column 1: Autonomous Loop Controls ---
-with col_ctrl1:
-    st.markdown('<div class="control-label">Autonomous Simulation</div>', unsafe_allow_html=True)
+    # --- 1. Autonomous Simulation ---
+    st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-bottom: 0.2rem;">Autonomous Simulation</div>', unsafe_allow_html=True)
     is_running = st.session_state.get("is_simulating", False)
     play_label = "Resume" if st.session_state.current_time > 0 else "Start"
 
-    c_play, c_pause, c_step = st.columns(3)
-    with c_play:
-        st.markdown('<div class="btn-ctrl-play"></div>', unsafe_allow_html=True)
-        if st.button(
-            play_label,
-            icon=":material/play_arrow:",
-            width="stretch",
-            type="primary" if not is_running else "secondary",
-            disabled=is_running,
-            key="btn_play",
-        ):
-            st.session_state.is_simulating = True
-            st.rerun()
-    with c_pause:
-        st.markdown('<div class="btn-ctrl-pause"></div>', unsafe_allow_html=True)
-        if st.button(
-            "Pause",
-            icon=":material/pause:",
-            width="stretch",
-            type="primary" if is_running else "secondary",
-            disabled=not is_running,
-            key="btn_pause",
-        ):
-            st.session_state.is_simulating = False
-            st.rerun()
-    with c_step:
-        st.markdown('<div class="btn-ctrl-step"></div>', unsafe_allow_html=True)
-        if st.button(
-            "Step (+25s)",
-            icon=":material/skip_next:",
-            width="stretch",
-            key="btn_step",
-        ):
-            st.session_state.current_time += 25.0
-            sim.advance_clock(st.session_state.current_time)
-            st.rerun()
+    st.markdown('<div class="btn-ctrl-play"></div>', unsafe_allow_html=True)
+    if st.button(
+        play_label,
+        width="stretch",
+        type="primary" if not is_running else "secondary",
+        disabled=is_running,
+        key="btn_play",
+    ):
+        st.session_state.is_simulating = True
+        st.rerun()
 
-# --- Column 2: Vehicle Breakdown Disruption ---
-with col_ctrl2:
-    st.markdown('<div class="control-label">Mechanical Disruption</div>', unsafe_allow_html=True)
+    st.markdown('<div class="btn-ctrl-pause"></div>', unsafe_allow_html=True)
+    if st.button(
+        "Pause",
+        width="stretch",
+        type="primary" if is_running else "secondary",
+        disabled=not is_running,
+        key="btn_pause",
+    ):
+        st.session_state.is_simulating = False
+        st.rerun()
+
+    st.markdown('<div class="btn-ctrl-step"></div>', unsafe_allow_html=True)
+    if st.button("Step (+25s)", width="stretch", key="btn_step"):
+        st.session_state.current_time += 25.0
+        sim.advance_clock(st.session_state.current_time)
+        st.rerun()
+
+    # --- 2. Mechanical Disruption ---
+    st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-top: 0.45rem; margin-bottom: 0.2rem;">Mechanical Disruption</div>', unsafe_allow_html=True)
     active_broken = sim.broken_vehicles
     candidate_vans = [vid for vid in sim.vehicles if vid not in active_broken]
     target_van = min(candidate_vans) if candidate_vans else None
@@ -1069,29 +1364,25 @@ with col_ctrl2:
     btn_label = f"Breakdown (Van {target_van})" if target_van else "All Vans Inactive"
     st.markdown('<div class="btn-ctrl-breakdown"></div>', unsafe_allow_html=True)
 
-    if st.button(btn_label, icon=":material/warning:", width="stretch", disabled=van_disabled, key="btn_breakdown"):
-        # Real-time: Keep simulation running without halting!
+    if st.button(btn_label, width="stretch", disabled=van_disabled, key="btn_breakdown"):
         res = sim.trigger_breakdown(target_van)
         if res.get("status") == "already_completed":
-            st.toast(res.get("message"), icon=":material/info:")
+            st.toast(res.get("message"))
         else:
-            sim.replan(exploration_level=1)
+            sim.replan(exploration_level=1, reason=f"Mechanical Breakdown: Van {target_van} Disabled")
             rt = sim.replanning_history[-1]["runtime_ms"]
-            st.toast(f"Van {target_van} breakdown logged. Fleet re-routed in {rt:.2f} ms.", icon=":material/warning:")
+            st.toast(f"Van {target_van} breakdown logged. Fleet re-routed in {rt:.2f} ms.")
         st.rerun()
 
-# --- Column 3: Rush Order Injection ---
-with col_ctrl3:
-    st.markdown('<div class="control-label">Dynamic Customer Demand</div>', unsafe_allow_html=True)
+    # --- 3. Dynamic Customer Demand ---
+    st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-top: 0.45rem; margin-bottom: 0.2rem;">Dynamic Customer Demand</div>', unsafe_allow_html=True)
     st.markdown('<div class="btn-ctrl-rush"></div>', unsafe_allow_html=True)
-    if st.button("Inject Rush Orders (+3)", icon=":material/bolt:", width="stretch", key="btn_rush"):
-        # Real-time: Keep simulation running without halting!
+    if st.button("Inject Rush Orders (+3)", width="stretch", key="btn_rush"):
         st.session_state.rush_order_count += 1
         offset = st.session_state.rush_order_count * 10
         cur_t = float(st.session_state.current_time)
         serv = 90.0
 
-        # Realistic rush orders across the operational map with generous forward delivery windows
         rush_orders = [
             {
                 "cust_no": 100 + offset + 1,
@@ -1124,28 +1415,83 @@ with col_ctrl3:
 
         try:
             injected = sim.inject_new_orders(rush_orders)
-            sim.replan(exploration_level=1)
+            sim.replan(exploration_level=1, reason=f"Demand Surge: +{len(injected)} Rush Orders Scheduled")
             rt = sim.replanning_history[-1]["runtime_ms"]
-            st.toast(f"Injected {len(injected)} rush orders. Fleet re-routed in {rt:.2f} ms.", icon=":material/bolt:")
+            st.toast(f"Injected {len(injected)} rush orders. Fleet re-routed in {rt:.2f} ms.")
         except Exception as e:
             st.error(f"Failed to schedule rush orders: {e}")
         st.rerun()
+
+    # --- 4. System Reset ---
+    st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-top: 0.45rem; margin-bottom: 0.2rem;">System Control</div>', unsafe_allow_html=True)
+    st.markdown('<div class="btn-ctrl-reset"></div>', unsafe_allow_html=True)
+    if st.button("Reset Simulation", width="stretch", key="btn_reset"):
+        st.session_state.clear()
+        init_simulation_state()
+        st.rerun()
+
+    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.85rem 0;"></div>', unsafe_allow_html=True)
+
+    # --- 5. Virtual Clock Horizon ---
+    st.markdown('<div class="control-label">Virtual Clock Horizon</div>', unsafe_allow_html=True)
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        st.caption("Active State")
+        is_sim_active = st.session_state.get("is_simulating", False)
+        if sim.is_simulation_completed():
+            st.markdown('<span class="nexai-tag tag-blue">Complete</span>', unsafe_allow_html=True)
+        elif is_sim_active:
+            st.markdown('<span class="nexai-tag tag-emerald">Simulating</span>', unsafe_allow_html=True)
+        else:
+            st.markdown('<span class="nexai-tag tag-amber">Paused</span>', unsafe_allow_html=True)
+    with col_c2:
+        st.caption("Depot Horizon")
+        st.markdown(f'<div style="font-size: 1.1rem; font-weight: 600; color: #71717a;">T = {sim.instance.depot.due_date:.0f}s</div>', unsafe_allow_html=True)
+
+    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.85rem 0;"></div>', unsafe_allow_html=True)
+
+    # --- 6. Fleet Status ---
+    st.markdown('<div class="control-label">Fleet Status</div>', unsafe_allow_html=True)
+    broken_count = len(sim.broken_vehicles)
+    operational_count = len(sim.vehicles) - broken_count
+    st.markdown(
+        f"""
+        <div style="display: flex; flex-direction: column; gap: 0.65rem; font-size: 0.82rem; margin-top: 0.5rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #71717a;">Total Fleet</span>
+                <span class="nexai-tag tag-slate">{len(sim.vehicles)} Vans</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #71717a;">Operational</span>
+                <span class="nexai-tag tag-emerald">{operational_count} Active</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #71717a;">Disabled</span>
+                <span class="nexai-tag {'tag-rose' if broken_count > 0 else 'tag-slate'}">{broken_count} Offline</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #71717a;">Completed Stops</span>
+                <span class="nexai-tag tag-blue">{len(sim.completed_jobs)} / {sim.instance.num_customers} Done</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # ==============================================================================
 # 7. Live Display Fragment (Smooth In-Place Updates Without Page Reload)
 # ==============================================================================
-# Dynamic fragment interval: 0.25s when actively simulating, None when paused/idle
-sim_interval = 0.25 if st.session_state.get("is_simulating", False) else None
+# Dynamic fragment interval: configurable via SIMULATION_REFRESH_INTERVAL_SEC (300ms)
+sim_interval = SIMULATION_REFRESH_INTERVAL_SEC if st.session_state.get("is_simulating", False) else None
 
 @st.fragment(run_every=sim_interval)
 def render_live_simulation_board():
     sim_state: SimulationState = st.session_state.sim
 
-    # Autonomous clock step when simulating (runs indefinitely in continuous logistics mode)
+    # Central simulation update: advances every active vehicle concurrently by SIMULATION_TIMESTEP_SEC
     if st.session_state.get("is_simulating", False):
-        # Fine-grained micro-step: 2.0s per tick gives fluid smooth gliding
-        st.session_state.current_time += 2.0
+        st.session_state.current_time += SIMULATION_TIMESTEP_SEC
         sim_state.advance_clock(st.session_state.current_time)
 
     # --- A. Live Status & Progress Bar ---
@@ -1159,7 +1505,7 @@ def render_live_simulation_board():
     elif is_sim:
         status_tag = '<span class="nexai-tag tag-emerald"><span class="pulse-dot"></span> LIVE SIMULATION</span>'
     elif all_current_done:
-        status_tag = '<span class="nexai-tag tag-blue"><span class="material-symbols-rounded" style="font-size: 13px;">check_circle</span> READY FOR DISPATCH</span>'
+        status_tag = '<span class="nexai-tag tag-blue">READY FOR DISPATCH</span>'
     else:
         status_tag = '<span class="nexai-tag tag-amber"><span class="pulse-dot-amber"></span> PAUSED</span>'
 
@@ -1228,7 +1574,11 @@ def render_live_simulation_board():
         delta_color="off",
     )
 
-    # --- C. Interactive Plotly Map with Continuous Kinematics ---
+    # --- C. Live Van Package Distribution Table (Centered with Visual Update Animations) ---
+    st.markdown('<div class="control-label" style="margin-top: 1rem; margin-bottom: 0.35rem;">Fleet Package Allocation & Dispatch Status</div>', unsafe_allow_html=True)
+    st.markdown(render_fleet_package_manifest_html(sim_state), unsafe_allow_html=True)
+
+    # --- D. Interactive Plotly Map with Continuous Kinematics ---
     fig = plot_routes(sim_state)
     st.plotly_chart(fig, width="stretch", theme=None, key="dispatch_map", config={"displayModeBar": False, "responsive": True})
 
@@ -1240,96 +1590,10 @@ render_live_simulation_board()
 # 8. Detailed Telemetry & Fleet Manifest Tabs
 # ==============================================================================
 st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 1.5rem 0 1rem 0;"></div>', unsafe_allow_html=True)
-tab_routes, tab_telemetry, tab_fleet = st.tabs(
-    ["Route Manifests", "Telemetry Audit", "Fleet State"]
-)
+tab_routes, tab_raw = st.tabs(["Route Manifest", "Raw Tab"])
 
 with tab_routes:
-    routes_df = (
-        sim.current_solution.routes
-        if hasattr(sim.current_solution, "routes") and isinstance(sim.current_solution.routes, pd.DataFrame)
-        else pd.DataFrame()
-    )
-    if not routes_df.empty:
-        display_df = routes_df.copy()
-        display_df["arrival_time"] = display_df["arrival"].apply(
-            lambda v: f"{unscale_value(v, sim.scale_factor):.1f}"
-        )
-        display_df["service_time"] = display_df["service"].apply(
-            lambda v: f"{unscale_value(v, sim.scale_factor):.1f}"
-        )
-        display_df["location_x"] = display_df["location_index"].apply(
-            lambda loc: f"{get_node_coords(sim, loc)[0]:.1f}"
-        )
-        display_df["location_y"] = display_df["location_index"].apply(
-            lambda loc: f"{get_node_coords(sim, loc)[1]:.1f}"
-        )
+    st.markdown(render_route_manifest_table_html(sim), unsafe_allow_html=True)
 
-        cols_to_show = [
-            "vehicle_id",
-            "type",
-            "id",
-            "location_index",
-            "location_x",
-            "location_y",
-            "arrival_time",
-            "service_time",
-        ]
-        available_cols = [c for c in cols_to_show if c in display_df.columns]
-        st.dataframe(
-            display_df[available_cols].rename(
-                columns={
-                    "vehicle_id": "Van ID",
-                    "type": "Step Type",
-                    "id": "Customer ID",
-                    "location_index": "Matrix Index",
-                    "location_x": "X Coord",
-                    "location_y": "Y Coord",
-                    "arrival_time": "Arrival (T)",
-                    "service_time": "Service Duration",
-                }
-            ),
-            width="stretch",
-            hide_index=True,
-        )
-    else:
-        st.info("No active vehicle routes to display.")
-
-with tab_telemetry:
-    if sim.replanning_history:
-        history_df = pd.DataFrame(sim.replanning_history)
-        st.dataframe(
-            history_df.rename(
-                columns={
-                    "timestamp_unscaled": "Simulation Clock (T)",
-                    "runtime_ms": "Solver Compute Time (ms)",
-                    "cost": "VROOM Scaled Cost",
-                    "routes_count": "Active Routes",
-                    "pending_jobs_count": "Pending Jobs",
-                    "active_vehicles_count": "Available Fleet",
-                }
-            ),
-            width="stretch",
-            hide_index=True,
-        )
-    else:
-        st.info("No re-planning events recorded yet.")
-
-with tab_fleet:
-    fleet_rows = []
-    veh_pos = sim.get_interpolated_vehicle_positions()
-    for vid, vstate in sim.vehicles.items():
-        if vid <= 5 or vstate.completed_job_ids or vstate.is_broken:
-            pinfo = veh_pos.get(vid, {})
-            fleet_rows.append(
-                {
-                    "Vehicle ID": vid,
-                    "Operational Status": "DISABLED" if vstate.is_broken else "OPERATIONAL",
-                    "Live Status": pinfo.get("status", "Unknown"),
-                    "Current Location": f"({pinfo.get('x', 0.0):.1f}, {pinfo.get('y', 0.0):.1f})",
-                    "Remaining Capacity": f"{vstate.remaining_capacity} / {sim.instance.vehicle_capacity}",
-                    "Available From (T)": f"{unscale_value(vstate.available_from, sim.scale_factor):.1f}",
-                    "Completed Stops": len(vstate.completed_job_ids),
-                }
-            )
-    st.dataframe(pd.DataFrame(fleet_rows), width="stretch", hide_index=True)
+with tab_raw:
+    st.markdown(render_raw_audit_table_html(sim), unsafe_allow_html=True)
