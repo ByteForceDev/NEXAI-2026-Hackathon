@@ -21,6 +21,15 @@ from src.parser import parse_solomon_instance
 from src.simulator import SimulationState
 from src.utils import resolve_location_index, unscale_value
 from src.vrptw_solver import create_vroom_problem
+from src.geo_projection import (
+    detect_current_user_location,
+    get_active_anchor,
+    get_geographic_metadata,
+    set_active_anchor,
+    xy_to_latlon,
+)
+from src.road_routing import RoadRoutingService
+from src.components.leaflet_fleet_map import leaflet_fleet_map
 
 # ==============================================================================
 # Simulation Timing Configuration (Constants)
@@ -589,6 +598,18 @@ def init_simulation_state() -> None:
                     init_assignments[int(r["id"])] = int(r["vehicle_id"])
         st.session_state.initial_assignments = init_assignments
 
+
+# Automatic User Location Detection & Continental Land Anchor Sync
+if "geo_location" not in st.session_state:
+    st.session_state.geo_location = detect_current_user_location()
+
+cur_geo = st.session_state.geo_location
+set_active_anchor(
+    lat=cur_geo["lat"],
+    lon=cur_geo["lon"],
+    zone_name=cur_geo["zone_name"],
+    address=cur_geo["address"],
+)
 
 if "sim" not in st.session_state:
     init_simulation_state()
@@ -1259,6 +1280,166 @@ def plot_routes(sim_state: SimulationState) -> go.Figure:
     return fig
 
 
+def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
+    """
+    Construct serializable geographic payload for Leaflet OpenStreetMap component.
+    Maps Solomon Cartesian nodes to real-world WGS-84 coordinates and fetches road geometry.
+    """
+    cur_geo = st.session_state.get("geo_location", {})
+    if cur_geo:
+        set_active_anchor(
+            lat=cur_geo["lat"],
+            lon=cur_geo["lon"],
+            zone_name=cur_geo["zone_name"],
+            address=cur_geo["address"],
+        )
+    anchor = get_active_anchor()
+
+    depot_cart = sim_state.instance.depot
+    depot_lat, depot_lon = xy_to_latlon(depot_cart.x, depot_cart.y)
+
+    depot_data = {
+        "lat": depot_lat,
+        "lon": depot_lon,
+        "address": anchor.get("address", "Central Logistics Hub"),
+        "ready_time": int(depot_cart.ready_time),
+        "due_date": int(depot_cart.due_date),
+        "vehicle_count": int(sim_state.instance.vehicle_count),
+    }
+
+    # Group current solution routes
+    solution = sim_state.current_solution
+    routes_df = (
+        solution.routes
+        if hasattr(solution, "routes") and isinstance(solution.routes, pd.DataFrame)
+        else pd.DataFrame()
+    )
+
+    grouped_routes = {}
+    if not routes_df.empty:
+        for vid, grp in routes_df.groupby("vehicle_id"):
+            grouped_routes[int(vid)] = grp
+
+    active_vids = set(grouped_routes.keys())
+    active_vids.update(sim_state.broken_vehicles)
+    max_active_id = max([5] + list(active_vids))
+    total_fleet_count = min(len(sim_state.vehicles), max_active_id + 1)
+
+    routes_payload = []
+    for v_id in range(1, total_fleet_count + 1):
+        group = grouped_routes.get(v_id)
+        waypoints_latlon = []
+        assigned_jobs = 0
+        if group is not None and not group.empty:
+            for _, step in group.iterrows():
+                loc_idx = int(step["location_index"])
+                x, y = get_node_coords(sim_state, loc_idx)
+                lat, lon = xy_to_latlon(x, y)
+                waypoints_latlon.append((lat, lon))
+                if step.get("type") == "job":
+                    assigned_jobs += 1
+
+        if waypoints_latlon:
+            road_res = RoadRoutingService.get_road_polyline(waypoints_latlon)
+            routes_payload.append({
+                "vehicle_id": v_id,
+                "road_coordinates": road_res.get("coordinates", []),
+                "provider": road_res.get("provider", "OSRM Road Network"),
+                "assigned_packages": assigned_jobs,
+                "is_broken": (v_id in sim_state.broken_vehicles),
+            })
+
+    # Vehicles authoritative positions (unscaled continuous X, Y mapped to lat, lon)
+    veh_positions = sim_state.get_interpolated_vehicle_positions()
+    vehicles_payload = []
+    for v_id in range(1, total_fleet_count + 1):
+        p_info = veh_positions.get(v_id, {
+            "x": float(depot_cart.x),
+            "y": float(depot_cart.y),
+            "is_broken": False,
+            "is_active": False,
+            "status": "At Depot",
+            "speed": 1.0,
+            "route_progress": 0.0,
+            "waypoint_index": 0,
+        })
+        v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"])
+        rem_cap = (
+            int(sim_state.vehicles[v_id].remaining_capacity)
+            if v_id in sim_state.vehicles
+            else 0
+        )
+        vehicles_payload.append({
+            "vehicle_id": v_id,
+            "lat": v_lat,
+            "lon": v_lon,
+            "is_broken": bool(p_info.get("is_broken", False)),
+            "is_active": bool(p_info.get("is_active", False)),
+            "status": str("OFFLINE" if p_info.get("is_broken", False) else p_info.get("status", "Active")),
+            "waypoint_index": int(p_info.get("waypoint_index", 0)),
+            "distance_to_next_waypoint": float(p_info.get("distance_to_next_waypoint", 0.0)),
+            "speed": float(p_info.get("speed", 1.0)),
+            "route_progress": float(p_info.get("route_progress", 0.0)),
+            "remaining_capacity": rem_cap,
+        })
+
+    # Completed orders
+    completed_payload = []
+    for c_id, info in sim_state.completed_jobs.items():
+        loc = info.get("location_index", 0)
+        x, y = get_node_coords(sim_state, loc)
+        c_lat, c_lon = xy_to_latlon(x, y)
+        completed_payload.append({
+            "id": int(c_id),
+            "lat": c_lat,
+            "lon": c_lon,
+            "vehicle_id": int(info.get("vehicle_id", 0)),
+            "demand": info.get("demand", "-"),
+            "completion_time": float(unscale_value(info.get("completion_time", 0), sim_state.scale_factor)),
+        })
+
+    # Pending & Rush orders
+    pending_payload = []
+    rush_payload = []
+    for job_id, job in sim_state.pending_jobs.items():
+        loc_idx = resolve_location_index(job.location)
+        x, y = get_node_coords(sim_state, loc_idx)
+        p_lat, p_lon = xy_to_latlon(x, y)
+        meta = sim_state.customer_lookup.get(job_id)
+        demand = meta.demand if meta else (job.delivery[0] if job.delivery else "-")
+        ready_t = meta.ready_time if meta else 0
+        due_t = meta.due_date if meta else 0
+
+        ord_obj = {
+            "id": int(job_id),
+            "lat": p_lat,
+            "lon": p_lon,
+            "demand": demand,
+            "ready_time": ready_t,
+            "due_date": due_t,
+        }
+        if job_id >= 100:
+            rush_payload.append(ord_obj)
+        else:
+            pending_payload.append(ord_obj)
+
+    route_version = f"sol_{len(sim_state.replanning_history)}_{len(sim_state.broken_vehicles)}_{len(sim_state.completed_jobs)}"
+
+    return {
+        "depot": depot_data,
+        "routes": routes_payload,
+        "vehicles": vehicles_payload,
+        "completed_orders": completed_payload,
+        "pending_orders": pending_payload,
+        "rush_orders": rush_payload,
+        "center": [depot_lat, depot_lon],
+        "zoom": 13,
+        "sim_time": float(st.session_state.current_time),
+        "route_version": route_version,
+        "geo_metadata": get_geographic_metadata(),
+    }
+
+
 # ==============================================================================
 # 4. KPI Placeholder Renderer (Shadcn Light Metric Style)
 # ==============================================================================
@@ -1321,6 +1502,22 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
 with st.sidebar:
     st.markdown('<div class="section-title" style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem;">Simulation & Disruption Controls</div>', unsafe_allow_html=True)
     st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.25rem 0 0.5rem 0;"></div>', unsafe_allow_html=True)
+
+    # Location & Continental Road Grid Status
+    geo_info = st.session_state.get("geo_location", {})
+    city_display = geo_info.get("zone_name", "Vellore, Tamil Nadu, India")
+    st.markdown(
+        f"""
+        <div style="background: #ffffff; border: 1px solid #e4e4e7; border-radius: 6px; padding: 0.55rem 0.75rem; margin-bottom: 0.75rem; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
+            <div style="font-size: 0.65rem; color: #71717a; text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em;">Operational Location</div>
+            <div style="font-size: 0.82rem; font-weight: 600; color: #09090b; display: flex; align-items: center; gap: 5px; margin-top: 3px;">
+                <span style="color: #10b981; font-size: 0.85rem;">●</span> {city_display}
+            </div>
+            <div style="font-size: 0.7rem; color: #059669; font-weight: 500; margin-top: 2px;">100% Continental Land (Inland Road Grid)</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     # --- 1. Autonomous Simulation ---
     st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-bottom: 0.2rem;">Autonomous Simulation</div>', unsafe_allow_html=True)
@@ -1578,9 +1775,24 @@ def render_live_simulation_board():
     st.markdown('<div class="control-label" style="margin-top: 1rem; margin-bottom: 0.35rem;">Fleet Package Allocation & Dispatch Status</div>', unsafe_allow_html=True)
     st.markdown(render_fleet_package_manifest_html(sim_state), unsafe_allow_html=True)
 
-    # --- D. Interactive Plotly Map with Continuous Kinematics ---
-    fig = plot_routes(sim_state)
-    st.plotly_chart(fig, width="stretch", theme=None, key="dispatch_map", config={"displayModeBar": False, "responsive": True})
+    # --- D. Real-World Leaflet + OpenStreetMap Fleet Road Tracker ---
+    leaflet_data = build_leaflet_payload(sim_state)
+    leaflet_fleet_map(
+        depot=leaflet_data["depot"],
+        routes=leaflet_data["routes"],
+        vehicles=leaflet_data["vehicles"],
+        completed_orders=leaflet_data["completed_orders"],
+        pending_orders=leaflet_data["pending_orders"],
+        rush_orders=leaflet_data["rush_orders"],
+        center=leaflet_data["center"],
+        zoom=leaflet_data["zoom"],
+        sim_time=leaflet_data["sim_time"],
+        route_version=leaflet_data["route_version"],
+        height=560,
+        theme="light",
+        geo_metadata=leaflet_data["geo_metadata"],
+        key="leaflet_fleet_map_instance",
+    )
 
 # Invoke the live simulation fragment
 render_live_simulation_board()
