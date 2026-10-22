@@ -1,12 +1,6 @@
 ---
-title: NEXAI 2026 Autonomous Dynamic Route Engine
-emoji: 🚚
-colorFrom: gray
-colorTo: zinc
-sdk: streamlit
-sdk_version: 1.42.0
-app_file: app.py
-pinned: false
+**Title:** NEXAI 2026 Autonomous Dynamic Route Engine
+
 license: mit
 ---
 
