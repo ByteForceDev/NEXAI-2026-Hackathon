@@ -53,7 +53,8 @@
     #map-wrapper {
       position: relative;
       width: 100%;
-      height: 100%;
+      height: 560px;
+      min-height: 560px;
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -64,6 +65,7 @@
     #map {
       width: 100%;
       height: 100%;
+      min-height: 560px;
       background: #f8fafc;
     }
 
@@ -174,36 +176,58 @@
       border: 1px solid #ffffff;
     }
 
+    /* Neon Green for Visited / Completed Nodes */
     .order-marker-completed {
-      background: #e2e8f0;
-      color: #475569;
-      border: 1.5px solid #94a3b8;
+      background: #39ff14;
+      color: #032b05;
+      border: 2px solid #ffffff;
       border-radius: 50%;
-      width: 22px;
-      height: 22px;
-      font-size: 9px;
-      font-weight: 600;
+      width: 24px;
+      height: 24px;
+      font-size: 10px;
+      font-weight: 700;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      box-shadow: 0 0 10px #39ff14, 0 0 20px rgba(57, 255, 20, 0.7);
       cursor: pointer;
+      animation: neon-glow-green 2s ease-in-out infinite alternate;
     }
 
+    @keyframes neon-glow-green {
+      from {
+        box-shadow: 0 0 6px #39ff14, 0 0 12px rgba(57, 255, 20, 0.6);
+      }
+      to {
+        box-shadow: 0 0 12px #39ff14, 0 0 24px rgba(57, 255, 20, 0.95);
+      }
+    }
+
+    /* Neon Blue for Unvisited / Pending Nodes */
     .order-marker-pending {
-      background: #ffffff;
-      color: #09090b;
-      border: 2px solid #09090b;
+      background: #00f0ff;
+      color: #021526;
+      border: 2px solid #ffffff;
       border-radius: 50%;
-      width: 22px;
-      height: 22px;
-      font-size: 9px;
-      font-weight: 600;
+      width: 24px;
+      height: 24px;
+      font-size: 10px;
+      font-weight: 700;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      box-shadow: 0 0 10px #00f0ff, 0 0 20px rgba(0, 240, 255, 0.7);
       cursor: pointer;
+      animation: neon-glow-blue 2s ease-in-out infinite alternate;
+    }
+
+    @keyframes neon-glow-blue {
+      from {
+        box-shadow: 0 0 6px #00f0ff, 0 0 12px rgba(0, 240, 255, 0.6);
+      }
+      to {
+        box-shadow: 0 0 12px #00f0ff, 0 0 24px rgba(0, 240, 255, 0.95);
+      }
     }
 
     .order-marker-rush {
@@ -225,6 +249,38 @@
       transform: rotate(-45deg);
       font-size: 8px;
       font-weight: 700;
+    }
+
+    /* Map Action Buttons (Fullscreen Toggle) */
+    .map-action-btn {
+      position: absolute;
+      top: 80px;
+      left: 12px;
+      z-index: 1000;
+      background: #ffffff;
+      color: #09090b;
+      border: 1px solid #e4e4e7;
+      border-radius: 6px;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+      cursor: pointer;
+      transition: all 0.15s ease;
+      outline: none;
+    }
+
+    .map-action-btn:hover {
+      background: #f4f4f5;
+      border-color: #d4d4d8;
+    }
+
+    [data-theme="dark"] .map-action-btn {
+      background: #18181b;
+      color: #f4f4f5;
+      border-color: #27272a;
     }
 
     /* Vehicle Marker */
@@ -281,23 +337,33 @@
   <div id="map-wrapper">
     <div id="map"></div>
 
+    <!-- Fullscreen Toggle Button -->
+    <button id="btn-fullscreen" class="map-action-btn" title="Toggle Fullscreen" onclick="toggleMapFullscreen()">
+      <svg id="fs-expand-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+      </svg>
+      <svg id="fs-collapse-icon" style="display:none;" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+      </svg>
+    </button>
+
     <!-- Floating Top-Right Legend -->
     <div id="legend-panel" class="map-legend-panel">
       <div style="font-weight: 700; color: var(--foreground); margin-bottom: 2px;">
         OpenStreetMap Autonomous Fleet
       </div>
       <div class="legend-row">
-        <div class="legend-indicator" style="background: #09090b;"></div>
+        <div class="legend-indicator" style="background: #09090b; border: 1px solid #ffffff;"></div>
         <span>Central Hub (Depot)</span>
       </div>
       <div id="legend-vehicles" style="display: flex; flex-direction: column; gap: 4px;"></div>
       <div class="legend-row">
-        <div class="legend-indicator" style="background: #ffffff; border: 1.5px solid #09090b; border-radius: 50%;"></div>
-        <span>Pending Orders</span>
+        <div class="legend-indicator" style="background: #00f0ff; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #00f0ff;"></div>
+        <span style="font-weight: 600;">Unvisited Orders (Neon Blue)</span>
       </div>
       <div class="legend-row">
-        <div class="legend-indicator" style="background: #e2e8f0; border: 1.5px solid #94a3b8; border-radius: 50%;"></div>
-        <span>Completed Orders</span>
+        <div class="legend-indicator" style="background: #39ff14; border: 1.5px solid #ffffff; border-radius: 50%; box-shadow: 0 0 6px #39ff14;"></div>
+        <span style="font-weight: 600;">Visited Orders (Neon Green)</span>
       </div>
       <div class="legend-row">
         <div class="legend-indicator" style="background: #f59e0b; border: 1px solid #09090b; transform: rotate(45deg);"></div>
@@ -355,6 +421,7 @@
     // Kinematics Animation State for Each Vehicle
     // Map: vId -> { marker, currentLat, currentLon, targetLat, targetLon, speed, isBroken, heading, status, info }
     const vehicleKinematics = new Map();
+    const vehicleRoadPaths = new Map();
     let animFrameId = null;
     let lastTickTime = performance.now();
 
@@ -457,8 +524,13 @@
         <div class="vehicle-marker-container ${isBroken ? 'vehicle-marker-broken' : ''}">
           <div class="vehicle-marker-label">${label}</div>
           <div class="vehicle-marker-body" style="background: ${isBroken ? '#ef4444' : color};">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.5" style="transform: rotate(${rot}deg); transition: transform 0.15s linear;">
-              <polygon points="12 2 19 21 12 17 5 21 12 2"></polygon>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(${rot}deg); transition: transform 0.15s linear;">
+              <path d="M8 6v6"></path>
+              <path d="M16 6v6"></path>
+              <rect width="18" height="16" x="3" y="3" rx="2"></rect>
+              <path d="M3 12h18"></path>
+              <path d="M19 19v2a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-2"></path>
+              <path d="M7 19v2a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-2"></path>
             </svg>
           </div>
         </div>
@@ -473,7 +545,42 @@
     }
 
     // =========================================================================
-    // 60 FPS Browser Kinematics Loop
+    // Fullscreen Toggle Control
+    // =========================================================================
+    function toggleMapFullscreen() {
+      const wrapper = document.getElementById('map-wrapper');
+      const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+
+      if (!isFs) {
+        if (wrapper.requestFullscreen) {
+          wrapper.requestFullscreen();
+        } else if (wrapper.webkitRequestFullscreen) {
+          wrapper.webkitRequestFullscreen();
+        } else if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      }
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+      const expandIcon = document.getElementById('fs-expand-icon');
+      const collapseIcon = document.getElementById('fs-collapse-icon');
+      if (expandIcon) expandIcon.style.display = isFs ? 'none' : 'block';
+      if (collapseIcon) collapseIcon.style.display = isFs ? 'block' : 'none';
+      setTimeout(() => {
+        if (map) map.invalidateSize();
+      }, 150);
+    });
+
+    // =========================================================================
+    // 60 FPS Browser Kinematics Loop (Smooth Road Tracking)
     // =========================================================================
     function startKinematicsLoop() {
       if (animFrameId !== null) return;
@@ -492,34 +599,33 @@
 
           const dLat = kine.targetLat - kine.currentLat;
           const dLon = kine.targetLon - kine.currentLon;
-          const dist = Math.hypot(dLat, dLon);
+          const distToTarget = Math.hypot(dLat, dLon);
 
-          if (dist > 0.00001) {
-            // Smooth road interpolation
-            const stepFactor = Math.min(1.0, dt * 8.0);
+          if (distToTarget > 0.015) {
+            // Large distance jump / route reset: snap directly
+            kine.currentLat = kine.targetLat;
+            kine.currentLon = kine.targetLon;
+            kine.heading = (kine.targetHeading !== undefined && kine.targetHeading !== 0) ? kine.targetHeading : kine.heading;
+          } else if (distToTarget > 0.00001) {
+            const stepFactor = Math.min(1.0, dt * 10.0);
             kine.currentLat += dLat * stepFactor;
             kine.currentLon += dLon * stepFactor;
 
-            // Street-aligned heading angle
-            const angleDeg = (kine.targetHeading !== undefined && kine.targetHeading !== 0) 
-              ? kine.targetHeading 
+            const angleDeg = (kine.targetHeading !== undefined && kine.targetHeading !== 0)
+              ? kine.targetHeading
               : (Math.atan2(dLon, dLat) * 180 / Math.PI);
             kine.heading = angleDeg;
-
-            kine.marker.setLatLng([kine.currentLat, kine.currentLon]);
-
-            // Update rotation smoothly
-            const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
-            kine.marker.setIcon(createVehicleIcon(vId, color, false, kine.heading));
           } else {
             kine.currentLat = kine.targetLat;
             kine.currentLon = kine.targetLon;
-            kine.marker.setLatLng([kine.currentLat, kine.currentLon]);
-            if (kine.targetHeading !== undefined) {
-              const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
-              kine.marker.setIcon(createVehicleIcon(vId, color, false, kine.targetHeading));
+            if (kine.targetHeading !== undefined && kine.targetHeading !== 0) {
+              kine.heading = kine.targetHeading;
             }
           }
+
+          kine.marker.setLatLng([kine.currentLat, kine.currentLon]);
+          const color = ROUTE_COLORS[(vId - 1) % ROUTE_COLORS.length];
+          kine.marker.setIcon(createVehicleIcon(vId, color, false, kine.heading));
         });
 
         animFrameId = requestAnimationFrame(tick);
@@ -563,12 +669,22 @@
       const themeMode = args.theme || (msg.theme && msg.theme.base === 'dark' ? 'dark' : 'light');
       document.body.setAttribute('data-theme', themeMode);
 
-      // 3. Height synchronization
-      if (args.height && args.height !== componentHeight) {
-        componentHeight = args.height;
-        document.getElementById('map-wrapper').style.height = `${componentHeight}px`;
-        if (map) map.invalidateSize();
-        setFrameHeight(componentHeight);
+      // 3. Height synchronization - enforce explicit height on container and notify Streamlit
+      const targetHeight = (args.height && args.height > 0) ? args.height : componentHeight;
+      componentHeight = targetHeight;
+      const wrapElem = document.getElementById('map-wrapper');
+      const mapElem = document.getElementById('map');
+      if (wrapElem) {
+        wrapElem.style.height = `${componentHeight}px`;
+        wrapElem.style.minHeight = `${componentHeight}px`;
+      }
+      if (mapElem) {
+        mapElem.style.height = `${componentHeight}px`;
+        mapElem.style.minHeight = `${componentHeight}px`;
+      }
+      setFrameHeight(componentHeight);
+      if (map) {
+        map.invalidateSize();
       }
 
       // 4. Update Geo metadata description
@@ -601,7 +717,17 @@
         depotLayer.addLayer(depotMarker);
       }
 
-      // 5. Update Static Road Routes when Route Version Changes
+      // 5. Always keep vehicleRoadPaths updated with the latest road route coordinates
+      if (args.routes && args.routes.length > 0) {
+        vehicleRoadPaths.clear();
+        args.routes.forEach((route) => {
+          if (route.road_coordinates && route.road_coordinates.length >= 2) {
+            vehicleRoadPaths.set(route.vehicle_id, route.road_coordinates);
+          }
+        });
+      }
+
+      // Update Static Road Routes when Route Version Changes
       const routeVer = args.route_version || 'v1';
       if (routeVer !== lastRouteVersion) {
         lastRouteVersion = routeVer;
@@ -704,6 +830,14 @@
       }
 
       // 7. Ingest Dynamic Vehicle Kinematics State
+      const currentVIds = new Set((args.vehicles || []).map(v => v.vehicle_id));
+      vehicleKinematics.forEach((kine, vId) => {
+        if (!currentVIds.has(vId)) {
+          if (kine.marker && map) map.removeLayer(kine.marker);
+          vehicleKinematics.delete(vId);
+        }
+      });
+
       (args.vehicles || []).forEach((veh) => {
         const vId = veh.vehicle_id;
         const targetLat = Number(veh.lat);
@@ -768,12 +902,18 @@
       // 8. Start / maintain continuous 60 FPS interpolation loop
       startKinematicsLoop();
       setFrameHeight(componentHeight);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 60);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 250);
     });
 
-    // Notify Streamlit when component is mounted
+    // Initialize Map and notify Streamlit as soon as DOM is ready
     window.addEventListener('DOMContentLoaded', () => {
+      initMapOnce();
       sendToStreamlit("streamlit:componentReady", { apiVersion: 1 });
       setFrameHeight(componentHeight);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 80);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 350);
+      setTimeout(() => { if (map) map.invalidateSize(); }, 800);
     });
   </script>
 </body>

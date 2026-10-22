@@ -31,7 +31,7 @@ _ACTIVE_ANCHOR: Dict[str, Any] = {
     "zone_name": DEFAULT_ZONE_NAME,
     "address": DEFAULT_DEPOT_ADDRESS,
     "is_auto_detected": False,
-    "km_per_unit": 0.08,  # 1 unit ≈ 80 meters (keeps 100 stops within ~5km urban road grid)
+    "km_per_unit": 0.08,  # 1 unit ~ 80 meters (keeps 100 stops within ~5km urban road grid)
 }
 
 
@@ -85,6 +85,10 @@ def detect_current_user_location(timeout_sec: float = 2.5) -> Dict[str, Any]:
     }
 
 
+# Fast in-memory cache for projected node coordinates
+_NODE_PROJECTION_CACHE: Dict[Tuple[float, float, bool], Tuple[float, float]] = {}
+
+
 def set_active_anchor(lat: float, lon: float, zone_name: str, address: str) -> None:
     """Set the active geographic anchor dynamically for the entire application."""
     global _ACTIVE_ANCHOR
@@ -93,6 +97,7 @@ def set_active_anchor(lat: float, lon: float, zone_name: str, address: str) -> N
     _ACTIVE_ANCHOR["zone_name"] = str(zone_name)
     _ACTIVE_ANCHOR["address"] = str(address)
     _ACTIVE_ANCHOR["is_auto_detected"] = True
+    _NODE_PROJECTION_CACHE.clear()
 
 
 def get_active_anchor() -> Dict[str, Any]:
@@ -100,11 +105,19 @@ def get_active_anchor() -> Dict[str, Any]:
     return dict(_ACTIVE_ANCHOR)
 
 
-def xy_to_latlon(x: float, y: float) -> Tuple[float, float]:
+def xy_to_latlon(x: float, y: float, snap_to_road: bool = True) -> Tuple[float, float]:
     """
     Project continuous abstract Euclidean coordinates (X, Y) to (Latitude, Longitude)
     around the active auto-detected user location on solid continental land.
+    
+    When snap_to_road=True, automatically snaps coordinates to the nearest drivable road
+    ensuring 100% of customer orders and depot stops are directly accessible by road.
+    Cached for lightning-fast subsequent evaluation.
     """
+    cache_key = (round(float(x), 2), round(float(y), 2), bool(snap_to_road))
+    if cache_key in _NODE_PROJECTION_CACHE:
+        return _NODE_PROJECTION_CACHE[cache_key]
+
     depot_lat = _ACTIVE_ANCHOR["lat"]
     depot_lon = _ACTIVE_ANCHOR["lon"]
     km_per_unit = _ACTIVE_ANCHOR.get("km_per_unit", 0.08)
@@ -119,10 +132,19 @@ def xy_to_latlon(x: float, y: float) -> Tuple[float, float]:
     d_lon_deg = (dx_units * km_per_unit) * deg_lon_per_km
     d_lat_deg = (dy_units * km_per_unit) * deg_lat_per_km
 
-    lat = depot_lat + d_lat_deg
-    lon = depot_lon + d_lon_deg
+    lat = round(depot_lat + d_lat_deg, 6)
+    lon = round(depot_lon + d_lon_deg, 6)
 
-    return (round(lat, 6), round(lon, 6))
+    if snap_to_road:
+        try:
+            from src.road_routing import snap_to_nearest_road
+            lat, lon = snap_to_nearest_road(lat, lon)
+        except Exception:
+            pass
+
+    res = (round(lat, 6), round(lon, 6))
+    _NODE_PROJECTION_CACHE[cache_key] = res
+    return res
 
 
 def latlon_to_xy(lat: float, lon: float) -> Tuple[float, float]:
@@ -155,5 +177,5 @@ def get_geographic_metadata() -> Dict[str, Any]:
         "lat": _ACTIVE_ANCHOR["lat"],
         "lon": _ACTIVE_ANCHOR["lon"],
         "terrain_type": "100% Continental Inland Land (Local Urban Road Network)",
-        "scale_desc": f"1 abstract coordinate unit ≈ {_ACTIVE_ANCHOR.get('km_per_unit', 0.08) * 1000:.0f} meters",
+        "scale_desc": f"1 abstract coordinate unit ~ {_ACTIVE_ANCHOR.get('km_per_unit', 0.08) * 1000:.0f} meters",
     }

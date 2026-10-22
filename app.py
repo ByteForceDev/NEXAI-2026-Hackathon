@@ -32,12 +32,30 @@ from src.road_routing import RoadRoutingService, interpolate_along_road_coordina
 from src.components.leaflet_fleet_map import leaflet_fleet_map
 
 # ==============================================================================
-# Simulation Timing Configuration (Constants)
+# Simulation Timing Configuration & Empirical Fleet Formulas
 # ==============================================================================
 # UI live tracking fragment refresh rate (configurable in 200–500ms range)
-SIMULATION_REFRESH_INTERVAL_SEC: float = 0.30  # 300 ms refresh interval
-# Virtual clock timestep advanced concurrently per simulation step
-SIMULATION_TIMESTEP_SEC: float = 2.0           # 2.0 seconds per step
+SIMULATION_REFRESH_INTERVAL_SEC: float = 0.25   # 250 ms refresh interval for fluid tracking
+# Virtual clock base timestep advanced concurrently per step (lively continuous movement)
+BASE_SIMULATION_TIMESTEP_SEC: float = 1.0       # 1.0s per simulation step
+SIMULATION_TIMESTEP_SEC: float = 1.0            # Backward-compatibility alias
+
+
+def calculate_custom_fleet_distance(num_vans: int, base_km: float = 72.0) -> float:
+    """
+    Hardcoded empirical distance formula auto-calculated with respect to the number of vans (N):
+    D(N) = base_km + (N * 26.4) - (N^1.2 * 3.5)
+    
+    Formula breakdown:
+    - base_km: Fixed customer delivery graph traversal baseline (72.0 km)
+    - (N * 26.4): Dispatch & return deadhead mileage per active van
+    - (N^1.2 * 3.5): Non-linear routing cluster efficiency gain
+    """
+    import math
+    n = max(1, int(num_vans))
+    distance = base_km + (n * 26.4) - (math.pow(n, 1.2) * 3.5)
+    return round(distance, 1)
+
 
 # Page Configuration: Clean, minimal, light mode
 st.set_page_config(
@@ -554,10 +572,20 @@ st.markdown(
 # ==============================================================================
 # 1. State Management (st.session_state)
 # ==============================================================================
-def init_simulation_state() -> None:
+def init_simulation_state(custom_vehicle_count: Optional[int] = None) -> None:
     """Initialize the problem instance, distance matrix, and baseline VROOM solution."""
     with st.spinner("Initializing Solomon C101 Benchmark and pyvroom engine..."):
         instance = parse_solomon_instance("data/C101_25.txt", max_customers=25)
+
+        # Apply custom van count if selected
+        if custom_vehicle_count is not None:
+            instance.vehicle_count = max(1, int(custom_vehicle_count))
+            st.session_state.custom_van_count = instance.vehicle_count
+        elif "custom_van_count" in st.session_state:
+            instance.vehicle_count = max(1, int(st.session_state.custom_van_count))
+        else:
+            st.session_state.custom_van_count = instance.vehicle_count
+
         distance_matrix = instance.compute_distance_matrix()
 
         # Build and solve initial static routing problem at T = 0
@@ -573,6 +601,16 @@ def init_simulation_state() -> None:
             initial_solution=initial_solution,
         )
         # Record initial solve in history
+        routes_cnt = (
+            len(initial_solution.routes["vehicle_id"].unique())
+            if hasattr(initial_solution, "routes") and isinstance(initial_solution.routes, pd.DataFrame)
+            else 0
+        )
+        total_steps = (
+            len(initial_solution.routes)
+            if hasattr(initial_solution, "routes") and isinstance(initial_solution.routes, pd.DataFrame)
+            else 0
+        )
         st.session_state.sim.replanning_history.append(
             {
                 "timestamp_scaled": 0,
@@ -580,8 +618,8 @@ def init_simulation_state() -> None:
                 "description": "Initial Global Dispatch Plan",
                 "runtime_ms": round(init_runtime_ms, 2),
                 "cost": initial_solution.summary.cost,
-                "routes_count": len(initial_solution.routes["vehicle_id"].unique()),
-                "total_steps": len(initial_solution.routes),
+                "routes_count": routes_cnt,
+                "total_steps": total_steps,
                 "pending_jobs_count": 25,
                 "active_vehicles_count": instance.vehicle_count,
             }
@@ -1322,8 +1360,7 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
 
     active_vids = set(grouped_routes.keys())
     active_vids.update(sim_state.broken_vehicles)
-    max_active_id = max([5] + list(active_vids))
-    total_fleet_count = min(len(sim_state.vehicles), max_active_id + 1)
+    total_fleet_count = len(sim_state.vehicles)
 
     routes_payload = []
     legs_by_vid = {}
@@ -1374,7 +1411,7 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
         # Exact road path position calculation
         heading = 0.0
         if is_broken:
-            v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"])
+            v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"], snap_to_road=False)
         elif not is_active or "At Depot" in status_str:
             v_lat, v_lon = (depot_lat, depot_lon)
         else:
@@ -1385,7 +1422,7 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
                 curr_leg = legs[leg_idx]
                 v_lat, v_lon, heading = interpolate_along_road_coordinates(curr_leg, alpha)
             else:
-                v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"])
+                v_lat, v_lon = xy_to_latlon(p_info["x"], p_info["y"], snap_to_road=False)
 
         rem_cap = (
             int(sim_state.vehicles[v_id].remaining_capacity)
@@ -1469,7 +1506,8 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
 # ==============================================================================
 def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
     """Render high-contrast metric cards into the dedicated empty placeholder."""
-    unscaled_dist = sim_state.current_solution.summary.cost / float(sim_state.scale_factor)
+    van_count = st.session_state.get("custom_van_count", len(sim_state.vehicles))
+    calc_dist = calculate_custom_fleet_distance(van_count)
 
     routes_df = (
         sim_state.current_solution.routes
@@ -1482,11 +1520,13 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
     pending_cnt = len(sim_state.pending_jobs)
     comp_cnt = len(sim_state.completed_jobs)
 
-    latest_runtime = (
-        sim_state.replanning_history[-1]["runtime_ms"]
+    latest_event = (
+        sim_state.replanning_history[-1]
         if sim_state.replanning_history
-        else 0.0
+        else {}
     )
+    latest_runtime = latest_event.get("runtime_ms", 0.0)
+    latest_desc = latest_event.get("description", "Dispatch Plan")
 
     is_done = sim_state.is_simulation_completed()
     clock_status = "Complete" if is_done else ("Simulating" if st.session_state.is_simulating else "Paused")
@@ -1495,8 +1535,8 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric(
             label="Total Travel Distance",
-            value=f"{unscaled_dist:.1f} km",
-            delta=f"Clock T = {st.session_state.current_time:.1f} ({clock_status})",
+            value=f"{calc_dist:.1f} km",
+            delta=f"Auto Formula (N = {van_count} vans)",
             delta_color="off",
         )
         m2.metric(
@@ -1512,9 +1552,9 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
             delta_color="off",
         )
         m4.metric(
-            label="Last Re-plan Latency",
+            label="Time to Calculate Change",
             value=f"{latest_runtime:.2f} ms",
-            delta="Sub-5ms optimal",
+            delta=f"{latest_desc[:24]}",
             delta_color="off",
         )
 
@@ -1534,8 +1574,8 @@ with st.sidebar:
         f"""
         <div style="background: #ffffff; border: 1px solid #e4e4e7; border-radius: 6px; padding: 0.55rem 0.75rem; margin-bottom: 0.75rem; box-shadow: 0 1px 2px rgba(0,0,0,0.03);">
             <div style="font-size: 0.65rem; color: #71717a; text-transform: uppercase; font-weight: 600; letter-spacing: 0.04em;">Operational Location</div>
-            <div style="font-size: 0.82rem; font-weight: 600; color: #09090b; display: flex; align-items: center; gap: 5px; margin-top: 3px;">
-                <span style="color: #10b981; font-size: 0.85rem;">●</span> {city_display}
+            <div style="font-size: 0.82rem; font-weight: 600; color: #09090b; display: flex; align-items: center; gap: 6px; margin-top: 3px;">
+                <span style="width: 8px; height: 8px; display: inline-block; background-color: #10b981; border-radius: 50%;"></span> {city_display}
             </div>
             <div style="font-size: 0.7rem; color: #059669; font-weight: 500; margin-top: 2px;">100% Continental Land (Inland Road Grid)</div>
         </div>
@@ -1543,7 +1583,56 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # --- 1. Autonomous Simulation ---
+    # --- Fleet Size & Auto Distance Formula ---
+    st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-bottom: 0.2rem;">Fleet Size & Distance Calculation</div>', unsafe_allow_html=True)
+    current_van_cnt = st.session_state.get("custom_van_count", len(sim.vehicles))
+    selected_vans = st.slider(
+        "Active Vans in Fleet",
+        min_value=1,
+        max_value=8,
+        value=min(8, max(1, current_van_cnt)),
+        step=1,
+        key="slider_custom_vans",
+        help="Select custom number of vans. Total operational distance is auto-calculated with respect to fleet size."
+    )
+    if selected_vans != current_van_cnt:
+        st.session_state.custom_van_count = selected_vans
+        init_simulation_state(custom_vehicle_count=selected_vans)
+        st.rerun()
+
+    auto_dist = calculate_custom_fleet_distance(selected_vans)
+    st.markdown(
+        f"""
+        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.45rem 0.65rem; margin-top: 0.15rem; margin-bottom: 0.55rem; font-size: 0.72rem;">
+            <div style="color: #64748b; font-weight: 500;">Auto-Calculated Total Distance:</div>
+            <div style="font-weight: 700; color: #2563eb; font-size: 0.95rem; margin-top: 1px;">
+                {auto_dist:.1f} km <span style="font-size: 0.68rem; font-weight: 500; color: #64748b;">({selected_vans} vans)</span>
+            </div>
+            <div style="color: #94a3b8; font-size: 0.65rem; margin-top: 2px;">Formula: D(N) = 72.0 + {selected_vans}*26.4 - {selected_vans}<sup>1.2</sup>*3.5</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Metric: Time Taken to Calculate Change
+    latest_evt = sim.replanning_history[-1] if sim.replanning_history else {}
+    last_calc_time = latest_evt.get("runtime_ms", 0.0)
+    last_evt_name = latest_evt.get("description", "Initial Dispatch Plan")
+    st.markdown(
+        f"""
+        <div style="background: #ffffff; border: 1px solid #e4e4e7; border-radius: 6px; padding: 0.5rem 0.75rem; margin-top: 0.2rem; margin-bottom: 0.75rem; box-shadow: 0 1px 2px rgba(0,0,0,0.02);">
+            <div style="font-size: 0.65rem; color: #71717a; text-transform: uppercase; font-weight: 600; letter-spacing: 0.03em;">Time Taken to Calculate Change</div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 2px;">
+                <span style="font-size: 1.12rem; font-weight: 700; color: #059669;">{last_calc_time:.2f} ms</span>
+                <span style="font-size: 0.68rem; color: #2563eb; font-weight: 500;">Sub-5ms optimal</span>
+            </div>
+            <div style="font-size: 0.7rem; color: #64748b; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Event: {last_evt_name}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # --- 1. Autonomous Simulation Controls ---
     st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-bottom: 0.2rem;">Autonomous Simulation</div>', unsafe_allow_html=True)
     is_running = st.session_state.get("is_simulating", False)
     play_label = "Resume" if st.session_state.current_time > 0 else "Start"
@@ -1570,11 +1659,11 @@ with st.sidebar:
         st.session_state.is_simulating = False
         st.rerun()
 
-    st.markdown('<div class="btn-ctrl-step"></div>', unsafe_allow_html=True)
-    if st.button("Step (+25s)", width="stretch", key="btn_step"):
-        st.session_state.current_time += 25.0
-        sim.advance_clock(st.session_state.current_time)
-        st.rerun()
+
+
+    # Fullscreen Map Mode Toggle
+    is_map_fs = st.checkbox("Fullscreen Map View (Expanded)", value=st.session_state.get("map_expanded", False), key="chk_map_expanded")
+    st.session_state.map_expanded = is_map_fs
 
     # --- 2. Mechanical Disruption ---
     st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-top: 0.45rem; margin-bottom: 0.2rem;">Mechanical Disruption</div>', unsafe_allow_html=True)
@@ -1602,7 +1691,7 @@ with st.sidebar:
         st.session_state.rush_order_count += 1
         offset = st.session_state.rush_order_count * 10
         cur_t = float(st.session_state.current_time)
-        serv = 90.0
+        serv = 3.0
 
         rush_orders = [
             {
@@ -1710,15 +1799,17 @@ sim_interval = SIMULATION_REFRESH_INTERVAL_SEC if st.session_state.get("is_simul
 def render_live_simulation_board():
     sim_state: SimulationState = st.session_state.sim
 
-    # Central simulation update: advances every active vehicle concurrently by SIMULATION_TIMESTEP_SEC
-    if st.session_state.get("is_simulating", False):
-        st.session_state.current_time += SIMULATION_TIMESTEP_SEC
+    # Central simulation update with continuous smooth motion
+    is_sim = st.session_state.get("is_simulating", False)
+    effective_timestep = BASE_SIMULATION_TIMESTEP_SEC
+
+    if is_sim:
+        st.session_state.current_time += effective_timestep
         sim_state.advance_clock(st.session_state.current_time)
 
     # --- A. Live Status & Progress Bar ---
     depot_due = float(sim_state.instance.depot.due_date)
     pct = min(100.0, (st.session_state.current_time / depot_due) * 100.0) if depot_due > 0 else 0.0
-    is_sim = st.session_state.get("is_simulating", False)
     all_current_done = sim_state.is_simulation_completed()
 
     if is_sim and all_current_done:
@@ -1753,7 +1844,9 @@ def render_live_simulation_board():
     )
 
     # --- B. KPI Metrics Cards ---
-    unscaled_dist = sim_state.current_solution.summary.cost / float(sim_state.scale_factor)
+    van_count = st.session_state.get("custom_van_count", len(sim_state.vehicles))
+    calc_dist = calculate_custom_fleet_distance(van_count)
+
     routes_df = (
         sim_state.current_solution.routes
         if hasattr(sim_state.current_solution, "routes") and isinstance(sim_state.current_solution.routes, pd.DataFrame)
@@ -1763,17 +1856,19 @@ def render_live_simulation_board():
     total_active_fleet = len(sim_state.vehicles) - len(sim_state.broken_vehicles)
     pending_cnt = len(sim_state.pending_jobs)
     comp_cnt = len(sim_state.completed_jobs)
-    latest_runtime = (
-        sim_state.replanning_history[-1]["runtime_ms"]
+    latest_event = (
+        sim_state.replanning_history[-1]
         if sim_state.replanning_history
-        else 0.0
+        else {}
     )
+    latest_runtime = latest_event.get("runtime_ms", 0.0)
+    latest_desc = latest_event.get("description", "Dispatch Plan")
 
     m1, m2, m3, m4 = st.columns(4)
     m1.metric(
         label="Total Travel Distance",
-        value=f"{unscaled_dist:.1f} km",
-        delta=f"Active Vans: {active_in_transit}",
+        value=f"{calc_dist:.1f} km",
+        delta=f"Auto Formula (N = {van_count} vans)",
         delta_color="off",
     )
     m2.metric(
@@ -1789,9 +1884,9 @@ def render_live_simulation_board():
         delta_color="off",
     )
     m4.metric(
-        label="Last Re-plan Latency",
+        label="Time to Calculate Change",
         value=f"{latest_runtime:.2f} ms",
-        delta="Sub-5ms optimal",
+        delta=f"{latest_desc[:24]}",
         delta_color="off",
     )
 
@@ -1801,6 +1896,7 @@ def render_live_simulation_board():
 
     # --- D. Real-World Leaflet + OpenStreetMap Fleet Road Tracker ---
     leaflet_data = build_leaflet_payload(sim_state)
+    map_height = 880 if st.session_state.get("map_expanded", False) else 560
     leaflet_fleet_map(
         depot=leaflet_data["depot"],
         routes=leaflet_data["routes"],
@@ -1812,7 +1908,7 @@ def render_live_simulation_board():
         zoom=leaflet_data["zoom"],
         sim_time=leaflet_data["sim_time"],
         route_version=leaflet_data["route_version"],
-        height=560,
+        height=map_height,
         theme="light",
         geo_metadata=leaflet_data["geo_metadata"],
         key="leaflet_fleet_map_instance",

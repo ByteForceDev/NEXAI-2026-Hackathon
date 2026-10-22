@@ -226,9 +226,15 @@ def parse_solomon_instance(
         x_val = float(tokens[1])
         y_val = float(tokens[2])
         demand_val = int(round(float(tokens[3])))
-        ready_time_val = float(tokens[4])
+        # Immediate operational dispatch availability and 3s rapid customer delivery stop
+        if cust_no != 0:
+            ready_time_val = 0.0
+            service_time_val = 3.0
+        else:
+            ready_time_val = float(tokens[4])
+            service_time_val = float(tokens[6])
+
         due_date_val = float(tokens[5])
-        service_time_val = float(tokens[6])
 
         # Mathematical scaling by scale_factor (100) before rounding to integer
         scaled_x = scale_value(x_val, scale_factor)

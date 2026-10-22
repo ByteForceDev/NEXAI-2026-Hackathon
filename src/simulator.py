@@ -70,6 +70,7 @@ class VehicleState:
     is_active: bool = False
     assigned_orders: List[int] = field(default_factory=list)
     route_progress: float = 0.0  # 0.0 to 100.0%
+    leg_alpha: float = 0.0       # 0.0 to 1.0 progress along current waypoint leg
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -135,7 +136,8 @@ class SimulationState:
 
         # Coordinate registry: index matches row/col in distance_matrix
         # Index 0 is Depot; Indices 1..N are original customers; >N are newly injected orders
-        self.scaled_coordinates: List[Tuple[int, int]] = list(self.instance.scaled_coordinates)
+        self.base_scaled_coordinates: List[Tuple[int, int]] = list(self.instance.scaled_coordinates)
+        self.scaled_coordinates: List[Tuple[int, int]] = list(self.base_scaled_coordinates)
 
         # Fast customer metadata lookup by customer ID
         self.customer_lookup: Dict[int, Any] = {
@@ -430,7 +432,7 @@ class SimulationState:
 
             ready_val = float(cust_dict.get("ready_time", cust_dict.get("ready", cust_dict.get("READY TIME", 0.0))))
             due_val = float(cust_dict.get("due_date", cust_dict.get("due", cust_dict.get("DUE DATE", 1236.0))))
-            serv_val = float(cust_dict.get("service_time", cust_dict.get("service", cust_dict.get("SERVICE TIME", 90.0))))
+            serv_val = float(cust_dict.get("service_time", cust_dict.get("service", cust_dict.get("SERVICE TIME", 3.0))))
 
             # 3. Mathematical integer scaling (factor 100)
             scaled_x = scale_value(x_val, self.scale_factor)
@@ -446,12 +448,13 @@ class SimulationState:
 
             # 4. Check if existing location index is explicitly passed (shared node)
             explicit_loc = cust_dict.get("location_index")
-            if explicit_loc is not None and int(explicit_loc) < len(self.scaled_coordinates):
+            if explicit_loc is not None and int(explicit_loc) < len(self.base_scaled_coordinates):
                 loc_idx = int(explicit_loc)
             else:
-                # Append new coordinates and dynamically expand the distance matrix
-                self.scaled_coordinates.append((scaled_x, scaled_y))
-                loc_idx = len(self.scaled_coordinates) - 1
+                # Append new coordinates to base coordinates and dynamically expand
+                self.base_scaled_coordinates.append((scaled_x, scaled_y))
+                self.scaled_coordinates = list(self.base_scaled_coordinates)
+                loc_idx = len(self.base_scaled_coordinates) - 1
 
             # 5. Build and register NodeData
             node = NodeData(
@@ -586,35 +589,79 @@ class SimulationState:
         """
         start_time = time.perf_counter()
 
-        problem = vroom.Input()
+        # Reset scaled_coordinates to canonical problem nodes (Depot 0 + customers 1..N + injected rush orders)
+        self.scaled_coordinates = list(self.base_scaled_coordinates)
 
-        # 1. Attach duration matrix
-        vroom_mat = to_vroom_matrix(self.distance_matrix)
-        problem.set_durations_matrix(profile=profile, matrix_input=vroom_mat)
+        depot_x = float(self.instance.depot.x)
+        depot_y = float(self.instance.depot.y)
 
-        # 2. Add active operational vehicles with dynamically extended horizon for indefinite simulation
-        horizon_buffer = scale_value(3000.0, self.scale_factor)
-        max_horizon = max(int(self.instance.depot.scaled_due_date), self.current_time + horizon_buffer)
-        active_vehicles: List[vroom.Vehicle] = []
+        # 1. Determine departure location and operational parameters for every non-broken vehicle
+        # Active surviving vehicles en route or at stops start from their CURRENT continuous coordinates
+        active_veh_configs: List[Tuple[int, VehicleState, int, int, int]] = []
 
         for v_id, v_state in self.vehicles.items():
             # Exclude disabled/broken vehicles
             if v_id in self.broken_vehicles or v_state.is_broken:
                 continue
 
-            # If vehicle has returned to depot, reload to full capacity for new dispatches
-            if v_state.is_returned_to_depot or v_state.start_location == 0:
-                v_state.remaining_capacity = int(self.instance.vehicle_capacity)
+            # Determine whether vehicle is at the central depot
+            is_at_depot = (
+                v_state.is_returned_to_depot
+                or (v_state.current_x == 0.0 and v_state.current_y == 0.0)
+                or (abs(v_state.current_x - depot_x) < 1e-4 and abs(v_state.current_y - depot_y) < 1e-4)
+                or "At Depot" in v_state.status
+            )
 
-            rem_capacity = v_state.remaining_capacity
-            if rem_capacity <= 0:
-                continue
+            if is_at_depot:
+                start_loc = 0
+                time_window_start = max(self.current_time, int(self.instance.depot.scaled_ready_time))
+                rem_capacity = int(self.instance.vehicle_capacity)
+                v_state.start_location = 0
+                v_state.available_from = time_window_start
+                v_state.remaining_capacity = rem_capacity
+                v_state.current_x = depot_x
+                v_state.current_y = depot_y
+            else:
+                # Vehicle is actively deployed in the field: start from its exact continuous coordinates!
+                curr_sx = scale_value(v_state.current_x, self.scale_factor)
+                curr_sy = scale_value(v_state.current_y, self.scale_factor)
 
-            start_loc = v_state.start_location
-            time_window_start = v_state.available_from
+                # Register transient departure location in scaled_coordinates
+                start_loc = len(self.scaled_coordinates)
+                self.scaled_coordinates.append((curr_sx, curr_sy))
 
+                time_window_start = self.current_time
+                rem_capacity = v_state.remaining_capacity
+                if rem_capacity <= 0:
+                    rem_capacity = int(self.instance.vehicle_capacity)
+
+                v_state.start_location = start_loc
+                v_state.available_from = time_window_start
+                v_state.remaining_capacity = rem_capacity
+
+            active_veh_configs.append((v_id, v_state, start_loc, time_window_start, rem_capacity))
+
+        if not active_veh_configs:
+            raise RuntimeError("No active vehicles available for re-planning!")
+
+        # 2. Recompute Euclidean duration/distance matrix covering all customer nodes + active vehicle departure coordinates
+        self.distance_matrix = compute_distance_matrix(
+            self.scaled_coordinates,
+            scale_factor=self.scale_factor,
+            already_scaled=True,
+        )
+
+        problem = vroom.Input()
+        vroom_mat = to_vroom_matrix(self.distance_matrix)
+        problem.set_durations_matrix(profile=profile, matrix_input=vroom_mat)
+
+        # 3. Add active operational vehicles with dynamically extended horizon for indefinite simulation
+        horizon_buffer = scale_value(3000.0, self.scale_factor)
+        max_horizon = max(int(self.instance.depot.scaled_due_date), self.current_time + horizon_buffer)
+        active_vehicles: List[vroom.Vehicle] = []
+
+        for v_id, v_state, start_loc, time_window_start, rem_capacity in active_veh_configs:
             veh_end = max(max_horizon, time_window_start + scale_value(1200.0, self.scale_factor))
-
             veh = vroom.Vehicle(
                 id=v_id,
                 start=start_loc,
@@ -624,9 +671,6 @@ class SimulationState:
                 time_window=vroom.TimeWindow(start=time_window_start, end=veh_end),
             )
             active_vehicles.append(veh)
-
-        if not active_vehicles:
-            raise RuntimeError("No active vehicles available for re-planning!")
 
         problem.add_vehicle(active_vehicles)
 
@@ -805,28 +849,51 @@ class SimulationState:
             last_arr_scaled = int(last_step.get("arrival", 0))
             num_steps = len(v_steps)
 
-            # 3. Pre-departure idle at Depot
+            # 3. Pre-departure idle at Depot or waiting at mid-route location
             if t_curr_scaled <= first_arr_scaled:
-                v_state.current_x = depot_x
-                v_state.current_y = depot_y
-                v_state.current_waypoint_index = 0
-                v_state.speed = 0.0
-                v_state.status = "At Depot (Pre-departure)"
-                v_state.is_active = True
-                v_state.route_progress = 0.0
-                if num_steps > 1:
-                    next_loc = int(v_steps[1].get("location_index", 0))
-                    nx, ny = self._get_unscaled_node_coords(next_loc)
-                    v_state.distance_to_next_waypoint = float(np.hypot(nx - depot_x, ny - depot_y))
+                start_loc_idx = int(first_step.get("location_index", 0))
+                if start_loc_idx == 0:
+                    v_state.current_x = depot_x
+                    v_state.current_y = depot_y
+                    v_state.current_waypoint_index = 0
+                    v_state.leg_alpha = 0.0
+                    v_state.speed = 0.0
+                    v_state.status = "At Depot (Pre-departure)"
+                    v_state.is_active = True
+                    v_state.route_progress = 0.0
+                    if num_steps > 1:
+                        next_loc = int(v_steps[1].get("location_index", 0))
+                        nx, ny = self._get_unscaled_node_coords(next_loc)
+                        v_state.distance_to_next_waypoint = float(np.hypot(nx - depot_x, ny - depot_y))
+                    else:
+                        v_state.distance_to_next_waypoint = 0.0
+                    continue
                 else:
-                    v_state.distance_to_next_waypoint = 0.0
-                continue
+                    # Vehicle is waiting/departing from its exact mid-route coordinates
+                    cx, cy = self._get_unscaled_node_coords(start_loc_idx)
+                    v_state.current_x = cx
+                    v_state.current_y = cy
+                    v_state.current_waypoint_index = 0
+                    v_state.leg_alpha = 0.0
+                    v_state.speed = 0.0
+                    next_id = v_steps[1].get("id") if num_steps > 1 else "Depot"
+                    v_state.status = f"En Route: Heading to #{next_id}"
+                    v_state.is_active = True
+                    v_state.route_progress = 0.0
+                    if num_steps > 1:
+                        next_loc = int(v_steps[1].get("location_index", 0))
+                        nx, ny = self._get_unscaled_node_coords(next_loc)
+                        v_state.distance_to_next_waypoint = float(np.hypot(nx - cx, ny - cy))
+                    else:
+                        v_state.distance_to_next_waypoint = 0.0
+                    continue
 
             # 4. Route completed: parked back at Depot
             if t_curr_scaled >= last_arr_scaled:
                 v_state.current_x = depot_x
                 v_state.current_y = depot_y
                 v_state.current_waypoint_index = num_steps - 1
+                v_state.leg_alpha = 1.0
                 v_state.speed = 0.0
                 v_state.distance_to_next_waypoint = 0.0
                 v_state.status = "At Depot (Route Completed)"
@@ -863,6 +930,7 @@ class SimulationState:
                     v_state.current_x = c_curr[0]
                     v_state.current_y = c_curr[1]
                     v_state.current_waypoint_index = i
+                    v_state.leg_alpha = 0.0
                     v_state.distance_to_next_waypoint = seg_dist
                     v_state.speed = 0.0
 
@@ -883,6 +951,7 @@ class SimulationState:
                     v_state.current_x = c_curr[0] + alpha * (c_next[0] - c_curr[0])
                     v_state.current_y = c_curr[1] + alpha * (c_next[1] - c_curr[1])
                     v_state.current_waypoint_index = i
+                    v_state.leg_alpha = alpha
                     v_state.distance_to_next_waypoint = (1.0 - alpha) * seg_dist
 
                     travel_time_unscaled = unscale_value(travel_time_scaled, self.scale_factor)
@@ -890,7 +959,7 @@ class SimulationState:
 
                     from_lbl = f"#{s_curr.get('id')}" if s_curr.get("id") is not None else "Depot"
                     to_lbl = f"#{s_next.get('id')}" if s_next.get("id") is not None else "Depot"
-                    v_state.status = f"In Transit: {from_lbl} ➔ {to_lbl} ({alpha*100:.0f}%)"
+                    v_state.status = f"In Transit: {from_lbl} -> {to_lbl} ({alpha*100:.0f}%)"
                     v_state.route_progress = round(((i + alpha) / max(1, num_steps - 1)) * 100.0, 1)
                     matched = True
                     break
@@ -899,6 +968,7 @@ class SimulationState:
                 loc = v_state.start_location
                 c = self._get_unscaled_node_coords(loc)
                 v_state.current_x, v_state.current_y = c[0], c[1]
+                v_state.leg_alpha = 0.0
                 v_state.status = "In Operation"
                 v_state.speed = 1.0
                 v_state.distance_to_next_waypoint = 0.0
@@ -920,6 +990,7 @@ class SimulationState:
                 "is_broken": v.is_broken,
                 "is_active": v.is_active,
                 "waypoint_index": v.current_waypoint_index,
+                "leg_alpha": v.leg_alpha,
                 "speed": v.speed,
                 "distance_to_next_waypoint": v.distance_to_next_waypoint,
                 "assigned_orders": list(v.assigned_orders),
