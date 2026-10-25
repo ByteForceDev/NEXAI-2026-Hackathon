@@ -9,7 +9,7 @@
 
 ## Contributors
 
-**Team ByteForceDev (VIT University):**
+**Team ByteForceDev:**
 
 * **Raghav Mrituanjaya KS** — [@raghavmri](https://github.com/raghavmri)
 * **Rachakonda Guru Karthikeya** — [@Karthik1404-h](https://github.com/Karthik1404-h)

@@ -18,6 +18,7 @@ except ImportError as err:
     ) from err
 
 from src.utils import to_vroom_matrix
+from src.customer_scoring_engine import CustomerScoringEngine
 
 
 def create_vroom_problem(
@@ -32,19 +33,7 @@ def create_vroom_problem(
       1. Duration matrix computed from Euclidean integer coordinates.
       2. Vehicle fleet with depot start/end steps, capacity constraints, and operational horizons.
       3. Customer delivery jobs with location indices, demands, service durations, and time windows.
-      
-    Args:
-        parsed_data: SolomonInstance object or dictionary containing:
-                     - vehicle_count: int
-                     - vehicle_capacity: int
-                     - depot: dict/NodeData (with scaled_ready_time, scaled_due_date)
-                     - customers: list of dicts/NodeData (with scaled_ready_time, scaled_due_date,
-                                  scaled_service_time, demand, cust_no)
-        distance_matrix: 2D integer distance/duration matrix (shape: (N+1, N+1)).
-        profile: Routing profile identifier (default: "car").
-        
-    Returns:
-        Configured pyvroom.Input problem object (unsolved).
+         Integrates ML-derived customer priority scores (new customer retention boost vs chronic misser penalty).
     """
     problem = vroom.Input()
 
@@ -79,7 +68,6 @@ def create_vroom_problem(
     depot_tw = vroom.TimeWindow(start=int(depot_start), end=int(depot_end))
 
     # 3. Add Vehicles
-    # Depot location index in distance_matrix is 0
     vehicles: List[vroom.Vehicle] = []
     for v_id in range(1, vehicle_count + 1):
         veh = vroom.Vehicle(
@@ -94,8 +82,8 @@ def create_vroom_problem(
 
     problem.add_vehicle(vehicles)
 
-    # 4. Add Jobs (Customer Stops)
-    # Location index corresponds to matrix row/col (1..N)
+    # 4. Add Jobs (Customer Stops) with ML-derived priority scoring
+    scoring_engine = CustomerScoringEngine.get_instance()
     jobs: List[vroom.Job] = []
     for loc_idx, cust in enumerate(customers, start=1):
         cust_id = cust.cust_no if hasattr(cust, "cust_no") else cust["cust_no"]
@@ -116,13 +104,24 @@ def create_vroom_problem(
             else cust["scaled_service_time"]
         )
 
-        job_tw = vroom.TimeWindow(start=int(ready_time), end=int(due_date))
+        profile = scoring_engine.get_profile(int(cust_id))
+        vroom_priority = int(profile.vroom_priority)
+
+        # Expedite due date for VIP / New Customers to ensure early schedule priority
+        effective_due = int(due_date)
+        if profile.priority_tier == "VIP Expedited":
+            effective_due = max(int(ready_time) + int(service_time) * 4, int(due_date * 0.75))
+        elif profile.priority_tier == "Priority High":
+            effective_due = max(int(ready_time) + int(service_time) * 4, int(due_date * 0.88))
+
+        job_tw = vroom.TimeWindow(start=int(ready_time), end=int(effective_due))
 
         job = vroom.Job(
             id=int(cust_id),
             location=loc_idx,
             default_service=int(service_time),
             delivery=[int(demand)],
+            priority=vroom_priority,
             time_windows=[job_tw],
         )
         jobs.append(job)

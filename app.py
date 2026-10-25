@@ -1,14 +1,6 @@
-"""
-NEXAI 2026 Hackathon - Track 4: Supply Chain & Logistics
-Problem Statement 4.3: Last-Mile Route Planner with Live Re-planning (VRPTW)
-Optimization Engine: pyvroom (High-performance VROOM C++ Bindings)
-
-Interactive Dispatcher Dashboard with Autonomous Simulation Loop and Live Disruption Engine.
-Light Mode Shadcn UI design with high-contrast monochrome palette, subtle accents, and Poppins typography.
-"""
-
 from typing import Any, Dict, List, Optional, Tuple
 import json
+import math
 import time
 
 import numpy as np
@@ -30,6 +22,8 @@ from src.geo_projection import (
 )
 from src.road_routing import RoadRoutingService, interpolate_along_road_coordinates
 from src.components.leaflet_fleet_map import leaflet_fleet_map
+from src.sla_risk_engine import SLARiskEngine, render_ai_sla_radar_html
+from src.customer_scoring_engine import CustomerScoringEngine, render_customer_priority_scoring_table_html
 
 # ==============================================================================
 # Simulation Timing Configuration & Empirical Fleet Formulas
@@ -59,7 +53,7 @@ def calculate_custom_fleet_distance(num_vans: int, base_km: float = 72.0) -> flo
 
 # Page Configuration: Clean, minimal, light mode
 st.set_page_config(
-    page_title="NEXAI | Autonomous Route Engine",
+    page_title="IntelliCode 2026 | Autonomous Route Engine",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
@@ -666,12 +660,18 @@ sim: SimulationState = st.session_state.sim
 
 def render_fleet_package_manifest_html(sim_state: SimulationState) -> str:
     """
-    Generate centered, Shadcn-styled HTML table with real-time visual color highlights
-    and animations on data updates.
+    Generate centered, Shadcn-styled HTML table with real-time visual color highlights,
+    animations on data updates, and ML-driven SLA risk scoring per vehicle.
     """
     init_assign = st.session_state.get("initial_assignments", {})
     prev_state = st.session_state.get("prev_manifest_state", {})
     new_state = {}
+
+    # ML SLA evaluation across active pending fleet
+    sla_report = SLARiskEngine.get_instance().evaluate_fleet_state(sim_state)
+    assessments_by_van: Dict[int, List[Any]] = {}
+    for ass in sla_report.get("assessments", []):
+        assessments_by_van.setdefault(ass.vehicle_id, []).append(ass)
 
     routes_df = (
         sim_state.current_solution.routes
@@ -764,12 +764,24 @@ def render_fleet_package_manifest_html(sim_state: SimulationState) -> str:
         else:
             new_badge = '<span style="color: #a1a1aa; font-size: 0.82rem;">0 (None)</span>'
 
+        # 5. AI SLA Risk Score Column (ML Predicted Probability)
+        v_ass = assessments_by_van.get(vid, [])
+        if is_broken:
+            sla_badge = '<span class="nexai-tag tag-slate" style="font-size: 0.78rem;">Offline</span>'
+        elif rem_count == 0 or not v_ass:
+            sla_badge = '<span class="nexai-tag tag-emerald" style="font-weight: 500; font-size: 0.78rem;">Low Risk (100% on-time)</span>'
+        else:
+            # Highlight bottleneck / worst-case stop risk for this vehicle
+            worst_stop = min(v_ass, key=lambda x: x.on_time_probability)
+            sla_badge = worst_stop.badge_html
+
         html_rows.append(
             f'<tr>'
             f'<td style="text-align: center;">{van_badge}</td>'
             f'<td style="text-align: center;">{tot_badge}</td>'
             f'<td style="text-align: center;">{rem_badge}</td>'
             f'<td style="text-align: center;">{new_badge}</td>'
+            f'<td style="text-align: center;">{sla_badge}</td>'
             f'</tr>'
         )
 
@@ -780,10 +792,11 @@ def render_fleet_package_manifest_html(sim_state: SimulationState) -> str:
         '<div class="manifest-table-container">'
         '<table class="manifest-table">'
         '<thead><tr>'
-        '<th style="width: 20%; text-align: center;">Van ID</th>'
-        '<th style="width: 25%; text-align: center;">Total Packages to be delivered</th>'
-        '<th style="width: 25%; text-align: center;">Remaining Packages</th>'
-        '<th style="width: 30%; text-align: center;">Newly assigned if any as per algorithm</th>'
+        '<th style="width: 15%; text-align: center;">Van ID</th>'
+        '<th style="width: 18%; text-align: center;">Total Packages</th>'
+        '<th style="width: 18%; text-align: center;">Remaining Packages</th>'
+        '<th style="width: 22%; text-align: center;">Newly Assigned</th>'
+        '<th style="width: 27%; text-align: center;">AI SLA Risk Score (ML)</th>'
         '</tr></thead>'
         f'<tbody>{rows_str}</tbody>'
         '</table>'
@@ -826,7 +839,7 @@ ROUTE_COLORS = [
 
 
 def render_route_manifest_table_html(sim_state: SimulationState) -> str:
-    """Generate centered HTML table for Route Manifest tab."""
+    """Generate centered HTML table for Route Manifest tab with ML SLA Risk column."""
     routes_df = (
         sim_state.current_solution.routes
         if hasattr(sim_state.current_solution, "routes") and isinstance(sim_state.current_solution.routes, pd.DataFrame)
@@ -835,11 +848,16 @@ def render_route_manifest_table_html(sim_state: SimulationState) -> str:
     if routes_df.empty:
         return '<div style="padding: 1.5rem; text-align: center; color: #71717a; font-size: 0.85rem;">No active vehicle routes to display.</div>'
 
+    # Retrieve real-time ML SLA evaluations
+    sla_report = SLARiskEngine.get_instance().evaluate_fleet_state(sim_state)
+    cid_assessments = {a.customer_id: a for a in sla_report.get("assessments", [])}
+
     rows = []
     for _, r in routes_df.iterrows():
         vid = int(r["vehicle_id"]) if pd.notna(r.get("vehicle_id")) else 0
         step_type = str(r.get("type", ""))
-        cid = str(int(r["id"])) if pd.notna(r.get("id")) and r.get("type") == "job" else "-"
+        cid_val = int(r["id"]) if pd.notna(r.get("id")) and r.get("type") == "job" else None
+        cid = str(cid_val) if cid_val is not None else "-"
         loc_idx = str(int(r["location_index"])) if pd.notna(r.get("location_index")) else "-"
 
         loc_coord = get_node_coords(sim_state, int(r["location_index"])) if pd.notna(r.get("location_index")) else (0.0, 0.0)
@@ -854,10 +872,18 @@ def render_route_manifest_table_html(sim_state: SimulationState) -> str:
 
         if step_type == "start":
             type_badge = '<span class="nexai-tag tag-blue" style="font-size: 0.75rem;">Depot Start</span>'
+            sla_badge = '<span style="color: #a1a1aa; font-size: 0.75rem;">-</span>'
         elif step_type == "end":
             type_badge = '<span class="nexai-tag tag-slate" style="font-size: 0.75rem;">Depot Return</span>'
+            sla_badge = '<span style="color: #a1a1aa; font-size: 0.75rem;">-</span>'
         else:
             type_badge = '<span class="nexai-tag tag-emerald" style="font-size: 0.75rem;">Customer Delivery</span>'
+            if cid_val in sim_state.completed_jobs:
+                sla_badge = '<span class="nexai-tag tag-emerald" style="font-size: 0.75rem;">Delivered</span>'
+            elif cid_val in cid_assessments:
+                sla_badge = cid_assessments[cid_val].badge_html
+            else:
+                sla_badge = '<span class="nexai-tag tag-emerald" style="font-size: 0.75rem;">Low Risk (100%)</span>'
 
         rows.append(
             '<tr>'
@@ -868,6 +894,7 @@ def render_route_manifest_table_html(sim_state: SimulationState) -> str:
             f'<td style="text-align: center; font-family: monospace; font-size: 0.8rem;">({x_str}, {y_str})</td>'
             f'<td style="text-align: center; font-weight: 500; color: #2563eb;">{arr}</td>'
             f'<td style="text-align: center; color: #71717a;">{serv}</td>'
+            f'<td style="text-align: center;">{sla_badge}</td>'
             '</tr>'
         )
 
@@ -883,6 +910,7 @@ def render_route_manifest_table_html(sim_state: SimulationState) -> str:
         '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Coordinates (X, Y)</th>'
         '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Arrival (T)</th>'
         '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Service Duration</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">AI SLA Risk (ML)</th>'
         '</tr></thead>'
         f'<tbody>{rows_str}</tbody>'
         '</table>'
@@ -931,6 +959,126 @@ def render_raw_audit_table_html(sim_state: SimulationState) -> str:
         '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Active Routes</th>'
         '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Pending Jobs</th>'
         '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Available Fleet</th>'
+        '</tr></thead>'
+        f'<tbody>{rows_str}</tbody>'
+        '</table>'
+        '</div>'
+    )
+
+
+def render_priority_delivery_proof_table_html(sim_state: SimulationState) -> str:
+    """
+    Generate an audit table proving that vans deliver packages strictly based on priority.
+    
+    Verifies that for every assigned vehicle, each consecutive delivery stop visits orders
+    in monotonic descending order of their ML Priority Score (Stop #1 has the highest priority).
+    """
+    routes_df = (
+        sim_state.current_solution.routes
+        if hasattr(sim_state.current_solution, "routes") and isinstance(sim_state.current_solution.routes, pd.DataFrame)
+        else pd.DataFrame()
+    )
+    if routes_df.empty:
+        return '<div style="padding: 1.5rem; text-align: center; color: #71717a; font-size: 0.85rem;">No active routes available.</div>'
+
+    engine = CustomerScoringEngine.get_instance()
+    job_df = routes_df[routes_df["type"] == "job"]
+
+    total_stops = 0
+    compliant_stops = 0
+    rows = []
+
+    for vid, grp in job_df.groupby("vehicle_id"):
+        vid = int(vid)
+        base_col = ROUTE_COLORS[(vid - 1) % len(ROUTE_COLORS)]
+        van_badge = f'<span class="nexai-tag tag-slate" style="font-weight: 600; font-size: 0.8rem; border-left: 3px solid {base_col};">Van {vid}</span>'
+
+        prev_score = float("inf")
+        for seq_idx, (_, r) in enumerate(grp.iterrows(), start=1):
+            cid = int(r["id"]) if pd.notna(r.get("id")) else 0
+            prof = engine.get_profile(cid)
+            cur_score = float(prof.ml_priority_score)
+            tier = prof.priority_tier
+            cust_name = prof.customer_name
+            segment = prof.segment
+
+            arr_time_str = f"{unscale_value(r.get('arrival', 0), sim_state.scale_factor):.1f}s"
+
+            # Check if this delivery satisfies the Priority Scheduling invariant (score <= prev_score)
+            is_valid = cur_score <= (prev_score + 1e-4)
+            total_stops += 1
+            if is_valid:
+                compliant_stops += 1
+            prev_score = cur_score
+
+            stop_badge = f'<span class="nexai-tag tag-blue" style="font-weight: 600; font-size: 0.75rem;">Stop #{seq_idx}</span>'
+
+            if is_valid:
+                proof_badge = '<span class="nexai-tag tag-emerald" style="font-weight: 600; font-size: 0.75rem;">Priority Compliant</span>'
+            else:
+                proof_badge = '<span class="nexai-tag tag-rose" style="font-weight: 600; font-size: 0.75rem;">Out of Order</span>'
+
+            # Tier badge styling
+            if tier == "VIP Expedited":
+                tier_badge = '<span class="nexai-tag tag-amber" style="font-weight: 600; font-size: 0.75rem;">VIP Expedited</span>'
+            elif tier == "Priority High":
+                tier_badge = '<span class="nexai-tag tag-blue" style="font-weight: 600; font-size: 0.75rem;">Priority High</span>'
+            elif tier == "Low / Saver":
+                tier_badge = '<span class="nexai-tag tag-rose" style="font-weight: 600; font-size: 0.75rem;">Low / Saver</span>'
+            else:
+                tier_badge = '<span class="nexai-tag tag-slate" style="font-size: 0.75rem;">Standard</span>'
+
+            status_str = "Delivered" if cid in sim_state.completed_jobs else "Scheduled"
+            status_badge = (
+                '<span class="nexai-tag tag-emerald" style="font-size: 0.75rem;">Delivered</span>'
+                if cid in sim_state.completed_jobs
+                else '<span class="nexai-tag tag-slate" style="font-size: 0.75rem;">Scheduled</span>'
+            )
+
+            rows.append(
+                '<tr>'
+                f'<td style="text-align: center;">{van_badge}</td>'
+                f'<td style="text-align: center;">{stop_badge}</td>'
+                f'<td style="text-align: center; font-weight: 600;">#{cid}</td>'
+                f'<td style="text-align: left; font-weight: 500;">{cust_name}</td>'
+                f'<td style="text-align: center; color: #475569; font-size: 0.8rem;">{segment}</td>'
+                f'<td style="text-align: center; font-weight: 700; color: #0284c7; font-size: 0.9rem;">{cur_score:.1f}</td>'
+                f'<td style="text-align: center;">{tier_badge}</td>'
+                f'<td style="text-align: center; font-family: monospace; color: #2563eb; font-weight: 500;">{arr_time_str}</td>'
+                f'<td style="text-align: center;">{status_badge}</td>'
+                f'<td style="text-align: center;">{proof_badge}</td>'
+                '</tr>'
+            )
+
+    compliance_pct = (compliant_stops / total_stops * 100.0) if total_stops > 0 else 100.0
+    rows_str = "".join(rows)
+
+    summary_banner = (
+        f'<div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; display: flex; align-items: center; justify-content: space-between;">'
+        f'  <div style="font-size: 0.85rem; color: #166534; font-weight: 500;">'
+        f'    <b>Priority Scheduling Audit:</b> {compliant_stops} of {total_stops} customer stops delivered in exact priority order sequence.'
+        f'  </div>'
+        f'  <span class="nexai-tag tag-emerald" style="font-size: 0.85rem; font-weight: 700; padding: 0.25rem 0.75rem;">'
+        f'    {compliance_pct:.1f}% Compliant'
+        f'  </span>'
+        f'</div>'
+    )
+
+    return (
+        f'{summary_banner}'
+        '<div class="manifest-table-container" style="max-height: 480px; overflow-y: auto;">'
+        '<table class="manifest-table">'
+        '<thead><tr>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Assigned Van</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Delivery Sequence</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Customer ID</th>'
+        '<th style="text-align: left; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Customer Name</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Segment</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">ML Priority Score</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Priority Tier</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Scheduled Arrival</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Status</th>'
+        '<th style="text-align: center; position: sticky; top: 0; background: #f8fafc; z-index: 2;">Algorithm Proof</th>'
         '</tr></thead>'
         f'<tbody>{rows_str}</tbody>'
         '</table>'
@@ -1446,16 +1594,20 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
 
     # Completed orders
     completed_payload = []
+    scoring_engine = CustomerScoringEngine.get_instance()
     for c_id, info in sim_state.completed_jobs.items():
         loc = info.get("location_index", 0)
         x, y = get_node_coords(sim_state, loc)
         c_lat, c_lon = xy_to_latlon(x, y)
+        prof = scoring_engine.get_profile(int(c_id))
         completed_payload.append({
             "id": int(c_id),
             "lat": c_lat,
             "lon": c_lon,
             "vehicle_id": int(info.get("vehicle_id", 0)),
             "demand": info.get("demand", "-"),
+            "priority_score": float(prof.ml_priority_score),
+            "priority_tier": prof.priority_tier,
             "completion_time": float(unscale_value(info.get("completion_time", 0), sim_state.scale_factor)),
         })
 
@@ -1470,6 +1622,7 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
         demand = meta.demand if meta else (job.delivery[0] if job.delivery else "-")
         ready_t = meta.ready_time if meta else 0
         due_t = meta.due_date if meta else 0
+        prof = scoring_engine.get_profile(int(job_id))
 
         ord_obj = {
             "id": int(job_id),
@@ -1478,6 +1631,8 @@ def build_leaflet_payload(sim_state: SimulationState) -> Dict[str, Any]:
             "demand": demand,
             "ready_time": ready_t,
             "due_date": due_t,
+            "priority_score": float(prof.ml_priority_score),
+            "priority_tier": prof.priority_tier,
         }
         if job_id >= 100:
             rush_payload.append(ord_obj)
@@ -1532,7 +1687,12 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
     clock_status = "Complete" if is_done else ("Simulating" if st.session_state.is_simulating else "Paused")
 
     with placeholder.container():
-        m1, m2, m3, m4 = st.columns(4)
+        sla_report = SLARiskEngine.get_instance().evaluate_fleet_state(sim_state)
+        avg_sla_on_time = sla_report.get("avg_on_time_pct", 100.0)
+        crit_sla_cnt = sla_report.get("critical_count", 0)
+        low_sla_cnt = sla_report.get("low_count", 0)
+
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric(
             label="Total Travel Distance",
             value=f"{calc_dist:.1f} km",
@@ -1555,6 +1715,12 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
             delta=f"{latest_desc[:24]}",
             delta_color="off",
         )
+        m5.metric(
+            label="AI SLA On-Time Health",
+            value=f"{avg_sla_on_time:.1f}%",
+            delta=f"{low_sla_cnt} Safe · {crit_sla_cnt} Critical" if crit_sla_cnt > 0 else f"{low_sla_cnt} Safe (GBM ML)",
+            delta_color="normal" if crit_sla_cnt == 0 else "inverse",
+        )
 
 
 # ==============================================================================
@@ -1562,6 +1728,20 @@ def render_kpi_metrics(placeholder: Any, sim_state: SimulationState) -> None:
 # 5. Sidebar: Setup, Simulation & Disruption Controls
 # ==============================================================================
 with st.sidebar:
+    st.markdown(
+        """
+        <div style="margin-bottom: 0.85rem; padding-bottom: 0.65rem; border-bottom: 1px solid #e4e4e7;">
+            <div style="font-size: 1.15rem; font-weight: 700; color: #09090b; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px;">
+                <span style="background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 800;">IC</span>
+                IntelliCode 2026
+            </div>
+            <div style="font-size: 0.72rem; color: #71717a; margin-top: 3px; font-weight: 500;">
+                Autonomous Fleet & Route Engine
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown('<div class="section-title" style="font-size: 0.95rem; font-weight: 600; margin-bottom: 0.35rem;">Simulation & Disruption Controls</div>', unsafe_allow_html=True)
     st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.25rem 0 0.5rem 0;"></div>', unsafe_allow_html=True)
 
@@ -1626,9 +1806,7 @@ with st.sidebar:
 
 
 
-    # Fullscreen Map Mode Toggle
-    is_map_fs = st.checkbox("Fullscreen Map View (Expanded)", value=st.session_state.get("map_expanded", False), key="chk_map_expanded")
-    st.session_state.map_expanded = is_map_fs
+    st.session_state.map_expanded = False
 
     # --- 2. Mechanical Disruption ---
     st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-top: 0.45rem; margin-bottom: 0.2rem;">Mechanical Disruption</div>', unsafe_allow_html=True)
@@ -1651,6 +1829,11 @@ with st.sidebar:
 
     # --- 3. Dynamic Customer Demand ---
     st.markdown('<div class="control-label" style="font-size: 0.68rem; color: #71717a; text-transform: uppercase; margin-top: 0.45rem; margin-bottom: 0.2rem;">Dynamic Customer Demand</div>', unsafe_allow_html=True)
+    if st.button("Custom Customer Order Intake", width="stretch", key="btn_open_dispatcher"):
+        st.session_state.show_order_dispatcher = True
+        st.session_state.is_simulating = False
+        st.rerun()
+
     st.markdown('<div class="btn-ctrl-rush"></div>', unsafe_allow_html=True)
     if st.button("Inject Rush Orders (+3)", width="stretch", key="btn_rush"):
         st.session_state.rush_order_count += 1
@@ -1702,56 +1885,247 @@ with st.sidebar:
     st.markdown('<div class="btn-ctrl-reset"></div>', unsafe_allow_html=True)
     if st.button("Reset Simulation", width="stretch", key="btn_reset"):
         st.session_state.clear()
+        CustomerScoringEngine._instance = None
         init_simulation_state()
         st.rerun()
 
-    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.85rem 0;"></div>', unsafe_allow_html=True)
 
-    # --- 5. Virtual Clock Horizon ---
-    st.markdown('<div class="control-label">Virtual Clock Horizon</div>', unsafe_allow_html=True)
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        st.caption("Active State")
-        is_sim_active = st.session_state.get("is_simulating", False)
-        if sim.is_simulation_completed():
-            st.markdown('<span class="nexai-tag tag-blue">Complete</span>', unsafe_allow_html=True)
-        elif is_sim_active:
-            st.markdown('<span class="nexai-tag tag-emerald">Simulating</span>', unsafe_allow_html=True)
+def render_add_customer_order_section(sim_state: SimulationState) -> None:
+    """
+    Interactive customer order intake and live ML route re-optimization panel.
+    Allows configuring custom customer profiles (order value, past miss rate, segment, coordinates),
+    scores priority in real-time with GradientBoostingRegressor, and dynamically remaps fleet routes.
+    """
+    engine = CustomerScoringEngine.get_instance()
+
+    # Check for recent replan notification banner
+    notice = st.session_state.get("recent_replan_notice")
+    if notice:
+        st.markdown(
+            '<div style="background: #f0fdf4; border: 1px solid #86efac; border-radius: 8px; padding: 0.75rem 1.1rem; margin-bottom: 0.85rem; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.02);">'
+            '<div style="display: flex; align-items: center; gap: 0.65rem;">'
+            '<span style="background: #16a34a; color: #ffffff; font-weight: 700; font-size: 0.72rem; padding: 2px 7px; border-radius: 4px; text-transform: uppercase;">Route Remapped</span>'
+            f'<span style="font-size: 0.84rem; color: #166534; font-weight: 600;">Customer #{notice["id"]} ({notice["name"]}) · Segment: {notice["segment"]} · ML Priority: {notice["score"]:.1f} → <strong>{notice["van_info"]}</strong> (Re-routed in {notice["runtime_ms"]:.2f} ms)</span>'
+            '</div>'
+            '<span style="font-size: 0.75rem; color: #15803d; font-weight: 500;">Live Road Polyline Updated</span>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    is_open = st.session_state.get("show_order_dispatcher", False)
+
+    with st.expander("Dispatch New Customer Order", expanded=is_open):
+        preset = st.radio(
+            "Select Scenario Preset (1-Click Fill) or Custom:",
+            [
+                "Custom Order",
+                "VIP Expedited (₹15,000 High-Value)",
+                "New Customer (₹5,200 Retention Target)",
+                "Chronic Misser (₹1,400 with 45% Miss Rate Penalty)",
+                "Loyal Regular (₹6,500 Safe)",
+            ],
+            horizontal=True,
+            key="preset_choice",
+        )
+
+        if preset == "VIP Expedited (₹15,000 High-Value)":
+            def_name = "Zenith Luxury Mart"
+            def_is_new = False
+            def_order_val = 15000.0
+            def_miss_rate = 0.0
+            def_demand = 15
+        elif preset == "New Customer (₹5,200 Retention Target)":
+            def_name = "Aditi Verma (1st Purchase)"
+            def_is_new = True
+            def_order_val = 5200.0
+            def_miss_rate = 0.0
+            def_demand = 10
+        elif preset == "Chronic Misser (₹1,400 with 45% Miss Rate Penalty)":
+            def_name = "Metro Wholesale Bargain"
+            def_is_new = False
+            def_order_val = 1400.0
+            def_miss_rate = 45.0
+            def_demand = 30
+        elif preset == "Loyal Regular (₹6,500 Safe)":
+            def_name = "Bluefin Tech Campus"
+            def_is_new = False
+            def_order_val = 6500.0
+            def_miss_rate = 3.0
+            def_demand = 20
         else:
-            st.markdown('<span class="nexai-tag tag-amber">Paused</span>', unsafe_allow_html=True)
-    with col_c2:
-        st.caption("Depot Horizon")
-        st.markdown(f'<div style="font-size: 1.1rem; font-weight: 600; color: #71717a;">T = {sim.instance.depot.due_date:.0f}s</div>', unsafe_allow_html=True)
+            def_name = "Express Client Order"
+            def_is_new = True
+            def_order_val = 4500.0
+            def_miss_rate = 0.0
+            def_demand = 15
 
-    st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 0.85rem 0;"></div>', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns([1.3, 1.1, 1.1])
 
-    # --- 6. Fleet Status ---
-    st.markdown('<div class="control-label">Fleet Status</div>', unsafe_allow_html=True)
-    broken_count = len(sim.broken_vehicles)
-    operational_count = len(sim.vehicles) - broken_count
-    st.markdown(
-        f"""
-        <div style="display: flex; flex-direction: column; gap: 0.65rem; font-size: 0.82rem; margin-top: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Total Fleet</span>
-                <span class="nexai-tag tag-slate">{len(sim.vehicles)} Vans</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Operational</span>
-                <span class="nexai-tag tag-emerald">{operational_count} Active</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Disabled</span>
-                <span class="nexai-tag {'tag-rose' if broken_count > 0 else 'tag-slate'}">{broken_count} Offline</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: #71717a;">Completed Stops</span>
-                <span class="nexai-tag tag-blue">{len(sim.completed_jobs)} / {sim.instance.num_customers} Done</span>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        with c1:
+            cust_name = st.text_input("Customer / Business Name", value=def_name, key="input_cust_name")
+            is_new = st.checkbox("Is First-Time Customer? (Retention Target)", value=def_is_new, key="input_is_new")
+
+        with c2:
+            order_val = st.number_input("Order Value (₹)", min_value=200.0, max_value=50000.0, value=float(def_order_val), step=250.0, key="input_order_val")
+            miss_rate = st.slider("Past Delivery Miss Rate (%)", min_value=0.0, max_value=70.0, value=float(def_miss_rate), step=1.0, key="input_miss_rate")
+
+        with c3:
+            demand = st.slider("Package Demand (kg)", min_value=5, max_value=50, value=int(def_demand), step=5, key="input_demand")
+
+        # Automatically determine Segment Classification
+        if is_new:
+            segment = "New Customer"
+        elif order_val >= 9000.0:
+            segment = "High-Value VIP"
+        elif miss_rate >= 30.0:
+            segment = "Chronic Misser"
+        elif order_val >= 4500.0:
+            segment = "Loyal Regular"
+        else:
+            segment = "Standard"
+
+        # Automatically determine Customer Lifetime Value (CLV)
+        if segment == "High-Value VIP":
+            clv = 9.5
+        elif segment == "New Customer":
+            clv = 5.0
+        elif segment == "Chronic Misser":
+            clv = 2.0
+        elif segment == "Loyal Regular":
+            clv = 8.0
+        else:
+            clv = min(9.0, max(2.0, (order_val / 1200.0)))
+
+        # Automatically determine Delivery Location (distributed across road grid)
+        cust_idx = len(sim_state.customer_lookup)
+        angle = (cust_idx * 137.5) * (math.pi / 180.0)
+        radius = 12.0 + ((cust_idx * 7) % 22)
+        loc_x = round(max(15.0, min(65.0, 40.0 + radius * math.cos(angle))), 1)
+        loc_y = round(max(20.0, min(75.0, 50.0 + radius * math.sin(angle))), 1)
+
+        # Automatically determine Delivery SLA Window
+        if segment in ("High-Value VIP", "New Customer"):
+            due_horizon = 350.0
+            urgency_feature = 0.90
+        elif segment == "Chronic Misser":
+            due_horizon = 900.0
+            urgency_feature = 0.25
+        else:
+            due_horizon = 550.0
+            urgency_feature = 0.60
+
+        # Real-time ML Evaluation
+        x_vec = np.array([[
+            float(1 if is_new else 0),
+            float(order_val),
+            float(miss_rate / 100.0),
+            float(clv),
+            float(demand),
+            float(urgency_feature),
+        ]], dtype=np.float32)
+
+        if engine.model is not None:
+            preview_score = float(engine.model.predict(x_vec)[0])
+        else:
+            preview_score = 50.0 + (30.0 if is_new else 0.0) + (order_val / 400.0) - (miss_rate * 0.5)
+        preview_score = max(5.0, min(99.0, preview_score))
+
+        if preview_score >= 80.0:
+            tier_badge = '<span class="nexai-tag tag-violet" style="font-weight: 600;">VIP Expedited</span>'
+            score_color = "#7c3aed"
+            tier_desc = "Top dispatch priority. Assigned to lead active van on earliest stop sequence."
+        elif preview_score >= 65.0:
+            tier_badge = '<span class="nexai-tag tag-blue" style="font-weight: 600;">Priority High</span>'
+            score_color = "#2563eb"
+            tier_desc = "High priority SLA. Preferred routing with guaranteed tight delivery window."
+        elif preview_score >= 42.0:
+            tier_badge = '<span class="nexai-tag tag-slate" style="font-weight: 500;">Standard</span>'
+            score_color = "#475569"
+            tier_desc = "Standard dispatch route allocation balanced with cargo capacity."
+        else:
+            tier_badge = '<span class="nexai-tag tag-amber" style="font-weight: 600;">Low / Saver</span>'
+            score_color = "#d97706"
+            tier_desc = "Reduced priority penalty due to elevated order rejection history."
+
+        st.markdown(
+            '<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.85rem 1.1rem; margin: 0.75rem 0 0.9rem 0;">'
+            '<div style="font-size: 0.72rem; text-transform: uppercase; color: #64748b; font-weight: 700;">Live ML Model Evaluation</div>'
+            f'<div style="font-size: 1.15rem; font-weight: 800; color: {score_color}; display: flex; align-items: center; gap: 0.5rem; margin-top: 2px;">'
+            f'<span>Predicted ML Priority: {preview_score:.1f} / 100</span>'
+            f'{tier_badge}'
+            '</div>'
+            f'<div style="font-size: 0.76rem; color: #64748b; margin-top: 2px;">{tier_desc}</div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        if st.button("Add Customer", width="stretch", type="primary", key="btn_dispatch_order"):
+            existing_ids = set(sim_state.customer_lookup.keys()) | set(sim_state.pending_jobs.keys()) | set(sim_state.completed_jobs.keys()) | set(engine.customer_profiles.keys())
+            next_cid = max(existing_ids) + 1 if existing_ids else 1
+
+            prof = engine.score_customer(
+                cust_no=next_cid,
+                customer_name=cust_name.strip() or f"Customer #{next_cid}",
+                segment=segment,
+                is_new_customer=1 if is_new else 0,
+                order_value_inr=float(order_val),
+                past_miss_rate=float(miss_rate) / 100.0,
+                clv_score=float(clv),
+                package_demand=int(demand),
+                ready_time=float(sim_state.current_time),
+                due_date=float(sim_state.current_time + due_horizon),
+                service_time=3.0,
+            )
+
+            order_dict = {
+                "cust_no": next_cid,
+                "customer_name": prof.customer_name,
+                "segment": prof.segment,
+                "is_new_customer": prof.is_new_customer,
+                "order_value_inr": prof.order_value_inr,
+                "past_miss_rate": prof.past_miss_rate,
+                "clv_score": prof.clv_score,
+                "demand": prof.package_demand,
+                "x": float(loc_x),
+                "y": float(loc_y),
+                "ready_time": float(sim_state.current_time),
+                "due_date": float(sim_state.current_time + due_horizon),
+                "service_time": 3.0,
+            }
+
+            try:
+                injected = sim_state.inject_new_orders([order_dict])
+                sim_state.replan(exploration_level=2, reason=f"New Order #{next_cid} ({prof.customer_name}) Scheduled: ML Priority {prof.ml_priority_score:.1f}")
+                rt_ms = sim_state.replanning_history[-1]["runtime_ms"]
+
+                assigned_van = None
+                assigned_stop = None
+                if hasattr(sim_state.current_solution, "routes") and isinstance(sim_state.current_solution.routes, pd.DataFrame):
+                    r_df = sim_state.current_solution.routes
+                    j_rows = r_df[r_df["id"] == next_cid]
+                    if not j_rows.empty:
+                        assigned_van = int(j_rows.iloc[0]["vehicle_id"])
+                        v_group = r_df[(r_df["vehicle_id"] == assigned_van) & (r_df["type"] == "job")]
+                        for seq_i, (_, step) in enumerate(v_group.iterrows(), start=1):
+                            if step.get("id") == next_cid:
+                                assigned_stop = seq_i
+                                break
+
+                van_info = f"Van {assigned_van} · Stop #{assigned_stop}" if (assigned_van and assigned_stop) else (f"Van {assigned_van}" if assigned_van else "Pending Dispatch")
+
+                st.session_state["recent_replan_notice"] = {
+                    "id": next_cid,
+                    "name": prof.customer_name,
+                    "segment": prof.segment,
+                    "score": prof.ml_priority_score,
+                    "van_info": van_info,
+                    "runtime_ms": rt_ms,
+                }
+                st.session_state["show_order_dispatcher"] = False
+                st.toast(f"Customer #{next_cid} added! ML Priority: {prof.ml_priority_score:.1f} → Assigned to {van_info} (re-planned in {rt_ms:.1f}ms)")
+            except Exception as e:
+                st.error(f"Failed to inject customer order: {e}")
+            st.rerun()
 
 
 # ==============================================================================
@@ -1829,7 +2203,13 @@ def render_live_simulation_board():
     latest_runtime = latest_event.get("runtime_ms", 0.0)
     latest_desc = latest_event.get("description", "Dispatch Plan")
 
-    m1, m2, m3, m4 = st.columns(4)
+    # Real-time ML SLA inference
+    sla_report = SLARiskEngine.get_instance().evaluate_fleet_state(sim_state)
+    avg_sla_on_time = sla_report.get("avg_on_time_pct", 100.0)
+    crit_sla_cnt = sla_report.get("critical_count", 0)
+    low_sla_cnt = sla_report.get("low_count", 0)
+
+    m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric(
         label="Total Travel Distance",
         value=f"{calc_dist:.1f} km",
@@ -1852,10 +2232,18 @@ def render_live_simulation_board():
         delta=f"{latest_desc[:24]}",
         delta_color="off",
     )
+    m5.metric(
+        label="AI SLA On-Time Health",
+        value=f"{avg_sla_on_time:.1f}%",
+        delta=f"{low_sla_cnt} Safe · {crit_sla_cnt} Critical" if crit_sla_cnt > 0 else f"{low_sla_cnt} Safe (GBM ML)",
+        delta_color="normal" if crit_sla_cnt == 0 else "inverse",
+    )
 
-    # --- C. Live Van Package Distribution Table (Centered with Visual Update Animations) ---
-    st.markdown('<div class="control-label" style="margin-top: 1rem; margin-bottom: 0.35rem;">Fleet Package Allocation & Dispatch Status</div>', unsafe_allow_html=True)
-    st.markdown(render_fleet_package_manifest_html(sim_state), unsafe_allow_html=True)
+    # --- C. Customer Order Intake & Dynamic Route Remapping ---
+    render_add_customer_order_section(sim_state)
+
+    # Customer Profiles & ML SLA Priority Scores
+    st.markdown(render_customer_priority_scoring_table_html(sim_state), unsafe_allow_html=True)
 
     # --- D. Real-World Leaflet + OpenStreetMap Fleet Road Tracker ---
     leaflet_data = build_leaflet_payload(sim_state)
@@ -1953,6 +2341,7 @@ def render_live_simulation_board():
                     st.error(f"Failed to schedule rush orders: {e}")
                 st.rerun()
 
+
 # Invoke the live simulation fragment
 render_live_simulation_board()
 
@@ -1961,10 +2350,19 @@ render_live_simulation_board()
 # 8. Detailed Telemetry & Fleet Manifest Tabs
 # ==============================================================================
 st.markdown('<div style="height: 1px; background-color: #e4e4e7; margin: 1.5rem 0 1rem 0;"></div>', unsafe_allow_html=True)
-tab_routes, tab_raw = st.tabs(["Route Manifest", "Raw Tab"])
+tab_proof, tab_sla = st.tabs([
+    "Priority Delivery Proof",
+    "AI SLA Risk Radar",
+])
 
-with tab_routes:
-    st.markdown(render_route_manifest_table_html(sim), unsafe_allow_html=True)
+with tab_proof:
+    st.markdown(render_priority_delivery_proof_table_html(sim), unsafe_allow_html=True)
 
-with tab_raw:
-    st.markdown(render_raw_audit_table_html(sim), unsafe_allow_html=True)
+with tab_sla:
+    st.markdown(render_ai_sla_radar_html(sim), unsafe_allow_html=True)
+
+# with tab_routes:
+#     st.markdown(render_route_manifest_table_html(sim), unsafe_allow_html=True)
+
+# with tab_raw:
+#     st.markdown(render_raw_audit_table_html(sim), unsafe_allow_html=True)

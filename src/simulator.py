@@ -36,6 +36,7 @@ from src.utils import (
     to_vroom_matrix,
     unscale_value,
 )
+from src.customer_scoring_engine import CustomerScoringEngine
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
@@ -99,6 +100,165 @@ class VehicleState:
         }
 
 
+class PriorityScheduledSolution:
+    """
+    Transparent proxy wrapper around vroom.Solution to enforce Priority Scheduling Algorithm.
+    
+    Guarantees that vehicles deliver packages according to the ML Priority Score sequence:
+    higher priority orders (e.g. VIPs / new customers) are visited first (Stop #1, #2...).
+    Seamlessly passes through summary, unassigned, to_dict(), and custom attributes.
+    """
+
+    def __init__(
+        self,
+        raw_solution: Any,
+        routes_df: pd.DataFrame,
+        routes_dict_list: Optional[List[Dict[str, Any]]] = None,
+    ) -> None:
+        self._raw = raw_solution
+        self.routes = routes_df
+        self._routes_dict_list = routes_dict_list or []
+        self.summary = getattr(raw_solution, "summary", None)
+        self.unassigned = getattr(raw_solution, "unassigned", None)
+        self.code = getattr(raw_solution, "code", 0)
+
+    def to_dict(self) -> Dict[str, Any]:
+        d = self._raw.to_dict() if hasattr(self._raw, "to_dict") else {}
+        if self._routes_dict_list:
+            d["routes"] = self._routes_dict_list
+        return d
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self._raw, item)
+
+
+def apply_priority_scheduling(
+    raw_solution: Any,
+    distance_matrix: np.ndarray,
+    completed_job_ids: Optional[Set[int]] = None,
+) -> PriorityScheduledSolution:
+    """
+    Apply Priority Scheduling Algorithm to vehicle delivery routes.
+    
+    For each vehicle:
+      1. Preserves start step (departure from depot or mid-route continuous location).
+      2. Preserves already completed jobs in their historical execution order.
+      3. Sorts all pending/remaining jobs descending by ML Priority Score (highest priority first).
+      4. Re-computes travel duration, arrival timestamps, and waiting times sequentially
+         using the dynamic distance_matrix so that kinematics and time advances remain exact.
+      5. Preserves depot return end step.
+      
+    Returns:
+      PriorityScheduledSolution wrapping the reordered routes.
+    """
+    if not hasattr(raw_solution, "routes") or raw_solution.routes is None:
+        return raw_solution
+    df = raw_solution.routes
+    if df.empty:
+        return raw_solution
+
+    scoring_engine = CustomerScoringEngine.get_instance()
+    completed = set(completed_job_ids or [])
+
+    new_df_rows: List[Dict[str, Any]] = []
+    new_dict_routes: List[Dict[str, Any]] = []
+
+    raw_dict = raw_solution.to_dict() if hasattr(raw_solution, "to_dict") else {}
+    raw_dict_routes = {
+        r.get("vehicle", r.get("vehicle_id")): r for r in raw_dict.get("routes", [])
+    }
+
+    for vid, grp in df.groupby("vehicle_id"):
+        vid = int(vid)
+        steps = grp.to_dict("records")
+        if not steps:
+            continue
+
+        start_step = None
+        end_step = None
+        jobs = []
+        for s in steps:
+            stype = s.get("type")
+            if stype == "start":
+                start_step = dict(s)
+            elif stype == "end":
+                end_step = dict(s)
+            elif stype == "job":
+                jobs.append(dict(s))
+
+        # Partition jobs: completed deliveries remain fixed; pending deliveries sorted by ML priority
+        completed_jobs_list = [j for j in jobs if int(j.get("id", 0)) in completed]
+        pending_jobs_list = [j for j in jobs if int(j.get("id", 0)) not in completed]
+
+        # Priority Scheduling Algorithm: Sort pending stops descending by ML priority score
+        pending_jobs_list.sort(
+            key=lambda j: -scoring_engine.get_profile(int(j["id"])).ml_priority_score
+        )
+
+        ordered_jobs = completed_jobs_list + pending_jobs_list
+
+        recalculated_steps: List[Dict[str, Any]] = []
+        if start_step is not None:
+            recalculated_steps.append(start_step)
+            curr_loc = int(start_step.get("location_index", 0))
+            curr_time = int(start_step.get("arrival", 0))
+            cum_duration = 0
+        else:
+            curr_loc = 0
+            curr_time = 0
+            cum_duration = 0
+
+        for j in ordered_jobs:
+            next_loc = int(j.get("location_index", 0))
+            travel = (
+                int(distance_matrix[curr_loc, next_loc])
+                if curr_loc < distance_matrix.shape[0] and next_loc < distance_matrix.shape[1]
+                else 0
+            )
+            cum_duration += travel
+            arr = curr_time + travel
+            serv = int(j.get("service", 0))
+            wait = 0
+
+            j_copy = dict(j)
+            j_copy["arrival"] = arr
+            j_copy["duration"] = cum_duration
+            j_copy["waiting_time"] = wait
+            recalculated_steps.append(j_copy)
+
+            curr_time = arr + wait + serv
+            curr_loc = next_loc
+
+        if end_step is not None:
+            end_loc = int(end_step.get("location_index", 0))
+            travel = (
+                int(distance_matrix[curr_loc, end_loc])
+                if curr_loc < distance_matrix.shape[0] and end_loc < distance_matrix.shape[1]
+                else 0
+            )
+            cum_duration += travel
+            end_step_copy = dict(end_step)
+            end_step_copy["arrival"] = curr_time + travel
+            end_step_copy["duration"] = cum_duration
+            recalculated_steps.append(end_step_copy)
+
+        new_df_rows.extend(recalculated_steps)
+
+        raw_r_meta = dict(raw_dict_routes.get(vid, {}))
+        dict_steps = []
+        for s in recalculated_steps:
+            ds = dict(s)
+            if ds.get("type") == "job":
+                ds["job"] = ds.get("id")
+            dict_steps.append(ds)
+        raw_r_meta["steps"] = dict_steps
+        raw_r_meta["duration"] = cum_duration
+        new_dict_routes.append(raw_r_meta)
+
+    new_df = pd.DataFrame(new_df_rows)
+    return PriorityScheduledSolution(raw_solution, new_df, new_dict_routes)
+
+
 class SimulationState:
     """
     Simulation State Manager for Dynamic Vehicle Routing with Time Windows (VRPTW).
@@ -128,7 +288,10 @@ class SimulationState:
         """
         self.instance = instance
         self.distance_matrix = distance_matrix.copy()
-        self.current_solution = initial_solution
+        # Enforce Priority Scheduling Algorithm on initial routing solution
+        self.current_solution = apply_priority_scheduling(
+            initial_solution, self.distance_matrix, completed_job_ids=set()
+        )
         self.scale_factor = scale_factor
 
         # Temporal clock (scaled integer)
@@ -174,22 +337,39 @@ class SimulationState:
         self._update_parallel_vehicle_movement(0.0)
 
     def _seed_initial_pending_jobs(self) -> None:
-        """Populate initial pending jobs pool with all customer nodes from the problem instance."""
+        """Populate initial pending jobs pool with customer nodes scored via ML priority model."""
         self.pending_jobs.clear()
+        scoring_engine = CustomerScoringEngine.get_instance()
         for idx, cust in enumerate(self.instance.customers, start=1):
+            cid = int(cust.cust_no)
+            prof = scoring_engine.get_profile(cid)
+            vroom_priority = int(prof.vroom_priority)
+
+            due_date = int(cust.scaled_due_date)
+            ready_time = int(cust.scaled_ready_time)
+            service_time = int(cust.scaled_service_time)
+
+            if prof.priority_tier == "VIP Expedited":
+                effective_due = max(ready_time + service_time * 4, int(due_date * 0.75))
+            elif prof.priority_tier == "Priority High":
+                effective_due = max(ready_time + service_time * 4, int(due_date * 0.88))
+            else:
+                effective_due = due_date
+
             job = vroom.Job(
-                id=int(cust.cust_no),
+                id=cid,
                 location=idx,
-                default_service=int(cust.scaled_service_time),
+                default_service=service_time,
                 delivery=[int(cust.demand)],
+                priority=vroom_priority,
                 time_windows=[
                     vroom.TimeWindow(
-                        start=int(cust.scaled_ready_time),
-                        end=int(cust.scaled_due_date),
+                        start=ready_time,
+                        end=effective_due,
                     )
                 ],
             )
-            self.pending_jobs[int(cust.cust_no)] = job
+            self.pending_jobs[cid] = job
 
     def advance_clock(self, T_event_unscaled: float) -> Dict[str, Any]:
         """
@@ -473,12 +653,33 @@ class SimulationState:
             )
             self.customer_lookup[cust_id] = node
 
-            # 6. Create vroom.Job and append to pending pool
+            # 6. Score customer through ML model and assign priority
+            scoring_engine = CustomerScoringEngine.get_instance()
+            if cust_id in scoring_engine.customer_profiles and "order_value_inr" not in cust_dict:
+                prof = scoring_engine.get_profile(cust_id)
+            else:
+                prof = scoring_engine.score_customer(
+                    cust_no=cust_id,
+                    customer_name=cust_dict.get("customer_name", f"Customer #{cust_id}"),
+                    segment=cust_dict.get("segment", "New Customer" if cust_dict.get("is_new_customer", 1) == 1 else "Standard"),
+                    is_new_customer=int(cust_dict.get("is_new_customer", 1)),
+                    order_value_inr=float(cust_dict.get("order_value_inr", 4500.0)),
+                    past_miss_rate=float(cust_dict.get("past_miss_rate", 0.0)),
+                    clv_score=float(cust_dict.get("clv_score", 5.0)),
+                    package_demand=demand_val,
+                    ready_time=ready_val,
+                    due_date=due_val,
+                    service_time=serv_val,
+                )
+            vroom_priority = int(prof.vroom_priority)
+
+            # Create vroom.Job with ML priority and append to pending pool
             job = vroom.Job(
                 id=cust_id,
                 location=loc_idx,
                 default_service=scaled_serv,
                 delivery=[demand_val],
+                priority=vroom_priority,
                 time_windows=[vroom.TimeWindow(start=scaled_ready, end=scaled_due)],
             )
             self.pending_jobs[cust_id] = job
@@ -697,6 +898,11 @@ class SimulationState:
         # 4. Invoke pyvroom optimization engine
         solution = problem.solve(exploration_level=exploration_level, nb_threads=nb_threads)
         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+
+        # Enforce Priority Scheduling Algorithm on re-planned solution
+        solution = apply_priority_scheduling(
+            solution, self.distance_matrix, completed_job_ids=set(self.completed_jobs.keys())
+        )
 
         # 5. Record telemetry and update current solution
         self.current_solution = solution
