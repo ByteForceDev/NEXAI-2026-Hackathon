@@ -1076,30 +1076,33 @@
       });
     }
 
-    function createOrderIcon(type, id) {
+    function createOrderIcon(type, id, priority) {
+      const prioStr = (priority !== undefined && priority !== null) ? `P:${Math.round(priority)}` : '';
+      const prioBadge = prioStr ? `<div style="font-size: 8px; font-weight: 700; color: #1e1b4b; background: #e0e7ff; border: 1px solid #818cf8; border-radius: 3px; padding: 0 2px; margin-top: 1px; white-space: nowrap; line-height: 1.1; text-align: center;">${prioStr}</div>` : '';
+
       if (type === 'completed') {
         return L.divIcon({
           className: 'custom-order-icon',
-          html: `<div class="order-marker-completed">#${id}</div>`,
-          iconSize: [22, 22],
-          iconAnchor: [11, 11],
-          popupAnchor: [0, -12]
+          html: `<div style="display: flex; flex-direction: column; align-items: center;"><div class="order-marker-completed">#${id}</div>${prioBadge}</div>`,
+          iconSize: [26, 32],
+          iconAnchor: [13, 13],
+          popupAnchor: [0, -14]
         });
       } else if (type === 'rush') {
         return L.divIcon({
           className: 'custom-order-icon',
-          html: `<div class="order-marker-rush"><span>R${id}</span></div>`,
-          iconSize: [20, 20],
-          iconAnchor: [10, 10],
-          popupAnchor: [0, -12]
+          html: `<div style="display: flex; flex-direction: column; align-items: center;"><div class="order-marker-rush"><span>R${id}</span></div>${prioBadge}</div>`,
+          iconSize: [26, 32],
+          iconAnchor: [13, 13],
+          popupAnchor: [0, -14]
         });
       } else {
         return L.divIcon({
           className: 'custom-order-icon',
-          html: `<div class="order-marker-pending">#${id}</div>`,
-          iconSize: [22, 22],
-          iconAnchor: [11, 11],
-          popupAnchor: [0, -12]
+          html: `<div style="display: flex; flex-direction: column; align-items: center;"><div class="order-marker-pending">#${id}</div>${prioBadge}</div>`,
+          iconSize: [26, 32],
+          iconAnchor: [13, 13],
+          popupAnchor: [0, -14]
         });
       }
     }
@@ -1581,11 +1584,13 @@
         // Completed Orders
         (args.completed_orders || []).forEach((ord) => {
           const m = L.marker([ord.lat, ord.lon], {
-            icon: createOrderIcon('completed', ord.id),
+            icon: createOrderIcon('completed', ord.id, ord.priority_score),
             zIndexOffset: 300
           });
+          const prioLine = (ord.priority_score !== undefined && ord.priority_score !== null) ? `<div><b>ML Priority:</b> <span style="font-weight: 700; color: #7c3aed;">${ord.priority_score.toFixed(1)}</span></div>` : '';
           m.bindPopup(`
             <div style="font-weight: 700; color: #059669;">Customer #${ord.id} [Delivered]</div>
+            ${prioLine}
             <div><b>Location:</b> (${ord.lat.toFixed(4)}, ${ord.lon.toFixed(4)})</div>
             <div><b>Delivered by:</b> Van #${ord.vehicle_id}</div>
             <div><b>Demand:</b> ${ord.demand || '-'} units</div>
@@ -1597,11 +1602,13 @@
         // Pending Orders
         (args.pending_orders || []).forEach((ord) => {
           const m = L.marker([ord.lat, ord.lon], {
-            icon: createOrderIcon('pending', ord.id),
+            icon: createOrderIcon('pending', ord.id, ord.priority_score),
             zIndexOffset: 400
           });
+          const prioLine = (ord.priority_score !== undefined && ord.priority_score !== null) ? `<div><b>ML Priority:</b> <span style="font-weight: 700; color: #7c3aed;">${ord.priority_score.toFixed(1)}</span></div>` : '';
           m.bindPopup(`
             <div style="font-weight: 700; color: #2563eb;">Customer #${ord.id} [Pending]</div>
+            ${prioLine}
             <div><b>Location:</b> (${ord.lat.toFixed(4)}, ${ord.lon.toFixed(4)})</div>
             <div><b>Demand:</b> ${ord.demand || '-'} units</div>
             <div><b>Time Window:</b> [${ord.ready_time || 0}s, ${ord.due_date || 0}s]</div>
@@ -1612,11 +1619,13 @@
         // Rush Orders
         (args.rush_orders || []).forEach((ord) => {
           const m = L.marker([ord.lat, ord.lon], {
-            icon: createOrderIcon('rush', ord.id),
+            icon: createOrderIcon('rush', ord.id, ord.priority_score),
             zIndexOffset: 500
           });
+          const prioLine = (ord.priority_score !== undefined && ord.priority_score !== null) ? `<div><b>ML Priority:</b> <span style="font-weight: 700; color: #7c3aed;">${ord.priority_score.toFixed(1)}</span></div>` : '';
           m.bindPopup(`
             <div style="font-weight: 700; color: #d97706;">[Rush Order] #${ord.id}</div>
+            ${prioLine}
             <div><b>Location:</b> (${ord.lat.toFixed(4)}, ${ord.lon.toFixed(4)})</div>
             <div><b>Demand:</b> ${ord.demand || '-'} units</div>
             <div><b>Time Window:</b> [${ord.ready_time || 0}s, ${ord.due_date || 0}s]</div>
