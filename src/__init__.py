@@ -1,5 +1,5 @@
 """
-IntelliCode 2026 - Last-Mile Route Planner with Live Re-planning (VRPTW).
+NexAI 2026 - Last-Mile Route Planner with Live Re-planning (VRPTW).
 """
 
 from src.parser import NodeData, SolomonInstance, parse_solomon_instance

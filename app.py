@@ -53,7 +53,7 @@ def calculate_custom_fleet_distance(num_vans: int, base_km: float = 72.0) -> flo
 
 # Page Configuration: Clean, minimal, light mode
 st.set_page_config(
-    page_title="IntelliCode 2026 | Autonomous Route Engine",
+    page_title="NexAI 2026 | Autonomous Route Engine",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
@@ -1732,8 +1732,8 @@ with st.sidebar:
         """
         <div style="margin-bottom: 0.85rem; padding-bottom: 0.65rem; border-bottom: 1px solid #e4e4e7;">
             <div style="font-size: 1.15rem; font-weight: 700; color: #09090b; letter-spacing: -0.02em; display: flex; align-items: center; gap: 8px;">
-                <span style="background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 800;">IC</span>
-                IntelliCode 2026
+                <span style="background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; width: 28px; height: 28px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 800;">NX</span>
+                NexAI 2026
             </div>
             <div style="font-size: 0.72rem; color: #71717a; margin-top: 3px; font-weight: 500;">
                 Autonomous Fleet & Route Engine
